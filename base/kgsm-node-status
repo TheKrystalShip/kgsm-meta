@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# kgsm-node-status — what this node runs, and what still needs a person.
+#
+# Read-only and always exits 0: it reports a state, it does not decide whether that state is
+# acceptable. Run it any time; the node's post-transaction hook ends with it, which is where most
+# people meet it.
+#
+set -uo pipefail
+
+LIB="/usr/lib/kgsm-base/node-state.sh"
+# shellcheck source=/dev/null
+if ! . "$LIB" 2>/dev/null; then
+    printf 'kgsm-node-status: %s is missing — reinstall kgsm-base\n' "$LIB" >&2
+    exit 0
+fi
+
+bold()  { printf '\033[1;34m%s\033[0m\n' "$*"; }
+warn()  { printf '\033[1;33m%s\033[0m\n' "$*"; }
+note()  { printf '   %s\n' "$*"; }
+
+kgsm_scan
+
+echo
+if (( ${#KGSM_PKGS[@]} == 0 )); then
+    bold "No KGSM packages are installed on this host."
+    note "pacman -S kgsm-node   lists the fleet's components and takes a selection."
+    echo
+    exit 0
+fi
+
+bold "KGSM node — ${#KGSM_PKGS[@]} package(s) installed"
+echo
+
+# ── the units ─────────────────────────────────────────────────────────────────
+
+total=$(( ${#KGSM_READY[@]} + ${#KGSM_BLOCKED[@]} + ${#KGSM_OPTIN[@]} ))
+if (( total == 0 )); then
+    note "None of them installs a systemd unit."
+else
+    printf '   %-34s %-9s %-9s %s\n' UNIT POLICY RUNNING PACKAGE
+    row() {
+        local unit="$1" policy="$2"
+        printf '   %-34s %-9s %-9s %s\n' \
+            "$unit" "$policy" "$(kgsm_unit_state "$unit")" "${KGSM_UNIT_PKG[$unit]}"
+    }
+    for u in "${KGSM_READY[@]}";   do row "$u" on;      done
+    for u in "${KGSM_BLOCKED[@]}"; do row "$u" blocked; done
+    for u in "${KGSM_OPTIN[@]}";   do row "$u" opt-in;  done
+fi
+echo
+
+# ── what a person still owes ──────────────────────────────────────────────────
+
+if (( ${#KGSM_WAITING[@]} )); then
+    warn "   Blocked — these units stay stopped until their env file is filled in:"
+    for entry in "${KGSM_WAITING[@]}"; do
+        printf '     %s\n' "${entry%%|*}"
+        printf '       %s\n' "${entry#*|}"
+    done
+    echo
+fi
+
+if (( ${#KGSM_ADVISORY[@]} )); then
+    note "Set only if this host signs people in through an external provider:"
+    for entry in "${KGSM_ADVISORY[@]}"; do
+        printf '     %s\n' "${entry%%|*}"
+        printf '       %s\n' "${entry#*|}"
+    done
+    note "Nothing is held up by these — a host whose people sign in with a KGSM password"
+    note "needs none of them."
+    echo
+fi
+
+if (( ${#KGSM_OPTIN[@]} )); then
+    note "Installed and deliberately not running — each is a decision, not a default:"
+    for u in "${KGSM_OPTIN[@]}"; do
+        case "$u" in
+            kgsm-rag-indexer.service)
+                why="builds the assistant's retrieval index" ;;
+            kgsm-llama-*)
+                why="the llama.cpp backend — kgsm-llama-use-backend moves this host onto it" ;;
+            *)  why="" ;;
+        esac
+        printf '     %-32s %s\n' "$u" "$why"
+    done
+    note "Turn one on with:  systemctl enable --now <unit>"
+    echo
+fi
+
+kgsm_have_systemd || {
+    note "There is no running systemd here, so the RUNNING column reads unknown and nothing"
+    note "was started. Run this again on the booted host."
+    echo
+}
+
+exit 0

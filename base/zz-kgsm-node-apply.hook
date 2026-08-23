@@ -1,0 +1,24 @@
+# Bring the node's KGSM units to the state its packages declare.
+#
+# The zz- prefix is load-bearing. alpm runs hooks in filename order and systemd's own —
+# 20-systemd-sysusers, 21-systemd-tmpfiles, 30-systemd-daemon-reload — must all have run before
+# anything here starts a unit: the account has to exist, the state tree has to exist, and systemd
+# has to have re-read the unit files. Sorting last is what guarantees that.
+#
+# Enabling is NOT done here. `systemctl preset` is pure symlink manipulation on disk, so each
+# package applies its own policy in its scriptlet, during the transaction, where it works in a
+# chroot too. Starting needs a running system, which a scriptlet cannot assume — hence the split.
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/lib/systemd/system/kgsm-*
+Target = opt/kgsm*
+Target = usr/bin/kgsm*
+
+[Action]
+Description = Applying KGSM node state...
+When = PostTransaction
+Exec = /usr/lib/kgsm-base/apply-node-state
+NeedsTargets

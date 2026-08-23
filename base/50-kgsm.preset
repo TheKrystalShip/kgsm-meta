@@ -1,0 +1,58 @@
+# systemd preset policy for the KGSM fleet.
+#
+# Arch ships `disable *` in 99-default.preset, so without this file every kgsm unit a package
+# installs would land disabled and a node would need a person to enable each one by hand. The first
+# matching entry across the preset files wins and they are read in lexical order, so 50- sits ahead
+# of that default and decides the KGSM units without touching anything else on the host.
+#
+# A package applies this to its OWN units in post_install and nowhere else: `systemctl preset` on
+# first install only, never on upgrade, so an administrator who disabled something keeps it disabled
+# across every later version.
+
+# ── The engine's resident half and the leaves that need no credential ─────────
+enable kgsm-watchdog.service
+enable kgsm-monitor.service
+enable kgsm-scheduler.service
+enable kgsm-reactor.service
+
+# The per-server network meter. It is enabled rather than opt-in because it rides the watchdog: the
+# unit is ordered after kgsm-watchdog and wanted by it, so it attaches to kgsm.slice once that slice
+# exists and re-attaches on every later watchdog start. On a host without the watchdog it simply
+# never runs, and kgsm-monitor reports rxBps/txBps as null — measured absence, never a fabricated 0.
+enable kgsm-net-meter.service
+
+# Journal retention. A system timer running as the kgsm account, so one enable covers a node with no
+# login session — which `systemctl --user` cannot, since it acts on one user's session and a package
+# scriptlet has no user to act for.
+enable kgsm-journal-prune.timer
+
+# ── The leaves a person has to give credentials to ────────────────────────────
+# Enabled here so they come up on the next boot once configured; the node's post-transaction hook
+# still refuses to START one whose env file holds keys nobody has set.
+enable kgsm-api.service
+enable kgsm-bot.service
+enable kgsm-assistant-service.service
+
+# ── Socket-activated: the socket is the unit that is enabled ──────────────────
+# Enabling the .service as well would defeat the activation — kgsm-firewall's daemon holds root and
+# kgsm-speech's holds ~1.6GB of models, and both are meant to exit when nobody is asking. An
+# inactive .service is each one working correctly.
+enable kgsm-firewall.socket
+enable kgsm-speech.socket
+disable kgsm-speech.service
+# kgsm-firewall.service carries no [Install] section — it is static, and a preset line for a static
+# unit changes nothing.
+
+# ── Opt-in: installed, and a decision rather than a default ───────────────────
+# The indexer starts building a retrieval corpus, which costs GPU time and disk on a host that may
+# have wanted the assistant alone. The assistant answers without it.
+disable kgsm-rag-indexer.service
+
+# The llama.cpp inference backend. Ollama is the alternative and a host runs one of them, so neither
+# can be a default: enabling these on a host serving models through Ollama would bind their ports
+# and load a second copy of the weights. `kgsm-llama-use-backend` moves a host between the two.
+# kgsm-llama-chat-proxy.service is static — socket-activated by kgsm-llama-chat.socket — so it takes
+# no line here.
+disable kgsm-llama-chat.socket
+disable kgsm-llama-chat.service
+disable kgsm-llama-embed.service

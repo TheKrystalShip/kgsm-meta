@@ -1,0 +1,81 @@
+# Maintainer: Cristian Moraru <info@thekrystalship.com>
+#
+# Build from this directory:  cd packaging && makepkg
+#
+# kgsm-base — everything the KGSM fleet shares and no single component owns: the service account,
+# the state tree, the shared sign-in file, the systemd preset policy, and the two tools that decide
+# what a node is ready to run.
+#
+# Builds nothing. Every payload file is shipped verbatim from ../base/.
+#
+# It carries no groups=('kgsm-node'): it arrives as a dependency of whatever a person selected, and
+# listing it in the selection prompt would offer a choice that is not one.
+
+pkgname=kgsm-base
+# A placeholder: pkgver() below replaces it with what deploy/version.sh reports, so the number is
+# declared in exactly one place and this file never carries a copy that can fall behind.
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="KGSM shared base — the service account, state tree, unit policy and node readiness tools"
+arch=('any')
+url="https://github.com/TheKrystalShip/kgsm-meta"
+license=('GPL-3.0-or-later')
+# No separate debug package: these are shipped to a private fleet, not a distro archive.
+options=('!debug')
+
+# systemd for sysusers/tmpfiles/preset and the systemctl the tools ask; pacman because the whole
+# readiness derivation is a query against what pacman installed rather than a list kept in a file.
+depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils')
+
+# The shared sign-in file is the one thing here a person edits. backup=() is pacman's version of
+# create-if-absent-never-clobber: an upgrade writes .pacnew beside an edited file, never over it.
+backup=('etc/kgsm/kgsm-auth.env')
+
+pkgver() {
+    "${startdir}/../deploy/version.sh" --pkgver
+}
+
+package() {
+    local base="${startdir}/../base"
+
+    # The service account every kgsm-* unit runs as. Declared once here: every package that names
+    # it depends on this one, so it exists before any unit that could be started.
+    install -Dm644 "${base}/sysusers.d/kgsm.conf" \
+        "${pkgdir}/usr/lib/sysusers.d/kgsm.conf"
+
+    # The shared state tree — the event journal, the leaf descriptors and their command manifests,
+    # and the account store. Written by several packages and owned by none of them.
+    install -Dm644 "${base}/tmpfiles.d/kgsm.conf" \
+        "${pkgdir}/usr/lib/tmpfiles.d/kgsm.conf"
+
+    # The OAuth applications every surface on the host signs people in through, with the values
+    # blank — no package ships a credential. Root-owned 0640 is correct rather than strict: systemd
+    # reads EnvironmentFile= as root before dropping to User=, so nothing reads it as the service
+    # account. It is a real file rather than a documented one because three leaves load it with
+    # EnvironmentFile=- and a host that signs nobody in must still find it there to fill in.
+    install -Dm640 "${base}/kgsm-auth.env" \
+        "${pkgdir}/etc/kgsm/kgsm-auth.env"
+
+    # Which units a node runs. Arch's 99-default.preset is `disable *`, so without this every kgsm
+    # unit would land disabled and a node would need a person to enable each one by hand.
+    install -Dm644 "${base}/50-kgsm.preset" \
+        "${pkgdir}/usr/lib/systemd/system-preset/50-kgsm.preset"
+
+    # The readiness derivation, shared by the report and by the hook that acts on it, so the two
+    # can never compute a different answer.
+    install -Dm644 "${base}/node-state.sh" \
+        "${pkgdir}/usr/lib/kgsm-base/node-state.sh"
+
+    install -Dm755 "${base}/apply-node-state" \
+        "${pkgdir}/usr/lib/kgsm-base/apply-node-state"
+
+    install -Dm755 "${base}/kgsm-node-status" \
+        "${pkgdir}/usr/bin/kgsm-node-status"
+
+    # PostTransaction, sorted after systemd's own hooks: the account, the state tree and the
+    # daemon-reload all have to be in place before anything is started.
+    install -Dm644 "${base}/zz-kgsm-node-apply.hook" \
+        "${pkgdir}/usr/share/libalpm/hooks/zz-kgsm-node-apply.hook"
+
+    install -Dm644 "${startdir}/../LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
