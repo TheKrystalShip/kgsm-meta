@@ -41,8 +41,10 @@ jobs:
     steps:
       # The container has neither git nor node, and every JavaScript action needs node present in
       # the container it runs in — so this plain shell step has to come before any `uses:`.
+      # diffutils is not in base and the script compares the served set with the rebuilt one, so
+      # without it every comparison silently reports a difference and the run refuses to publish.
       - name: Provision the container
-        run: pacman -Sy --noconfirm --needed git nodejs gnupg github-cli
+        run: pacman -Sy --noconfirm --needed git nodejs gnupg github-cli diffutils
 
       - uses: actions/checkout@v7
 

@@ -82,7 +82,7 @@ REPOS=(
     'kgsm-web:v'
 )
 
-for tool in repo-add repo-remove vercmp gpg gh curl bsdtar; do
+for tool in repo-add repo-remove vercmp gpg gh curl bsdtar diff cmp; do
     command -v "$tool" >/dev/null || { err "missing required tool: $tool"; exit 1; }
 done
 
