@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0]
+
+### Added — the first administrator's password is part of the report
+
+`kgsm-node-status` names the one-time password a package left for the first person to sign in:
+`/var/lib/<package>/initial-admin-password`, with the instruction to read it as root, sign in,
+change the password and delete the file. The file exists only between the first start that created
+that account and a person collecting it, so a node past that point sees nothing about it. The
+derivation follows the state-directory convention rather than a list of packages, so it holds for
+any component that mints one.
+
+The keys a service generates for itself are commented out in its env example, and the readiness scan
+counts only an uncommented blank key — so a self-completing service is `ready` on a fresh node with
+nothing asked of a person.
+
 ## [1.0.0]
 
 ### Added — `kgsm-base`, the package the fleet shares

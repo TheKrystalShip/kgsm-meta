@@ -61,6 +61,16 @@ if (( ${#KGSM_WAITING[@]} )); then
     echo
 fi
 
+if (( ${#KGSM_HANDOFF[@]} )); then
+    warn "   First sign-in — an administrator was created and its one-time password left here:"
+    for entry in "${KGSM_HANDOFF[@]}"; do
+        printf '     %s\n' "${entry%%|*}"
+        printf '       created by %s\n' "${entry#*|}"
+    done
+    note "Read it as root, sign in, change the password, then delete the file."
+    echo
+fi
+
 if (( ${#KGSM_ADVISORY[@]} )); then
     note "Set only if this host signs people in through an external provider:"
     for entry in "${KGSM_ADVISORY[@]}"; do

@@ -90,9 +90,17 @@ kgsm_env_files_of() {
     pacman -Qlq "$1" 2>/dev/null | grep -E '^/etc/.*\.env$' || true
 }
 
+# Where a package leaves a credential it generated for a person to collect. Every unit carries
+# StateDirectory=, so a package's state directory is /var/lib/<package> — the path follows from the
+# name and no list of packages is kept here.
+kgsm_admin_password_file() {
+    printf '/var/lib/%s/initial-admin-password' "$1"
+}
+
 # The keys in an env file that only a person can supply. A bare `KEY=` or a YOUR_..._HERE
 # placeholder is a value the package deliberately ships unset; anything a leaf runs perfectly well
-# without is commented out in its example instead, so a blank key here means the leaf is waiting.
+# without — an optional setting, or a secret the leaf generates for itself on first start — is
+# commented out in its example instead, so a blank key here means the leaf is waiting on a person.
 kgsm_missing_keys() {
     [[ -f "$1" ]] || return 0
     sed -n \
@@ -112,6 +120,9 @@ kgsm_missing_keys() {
 # KGSM_WAITING holds "<envfile>|<keys>" for every file with outstanding keys, and KGSM_ADVISORY the
 # same for a package that owns no unit — the shared sign-in file is the whole of that case, and
 # nothing is held up by it.
+#
+# KGSM_HANDOFF holds "<file>|<package>" for a credential a package generated and left for a person
+# to collect. It blocks nothing: the unit that wrote it is running.
 
 KGSM_PKGS=()
 KGSM_READY=()
@@ -119,14 +130,16 @@ KGSM_BLOCKED=()
 KGSM_OPTIN=()
 KGSM_WAITING=()
 KGSM_ADVISORY=()
+KGSM_HANDOFF=()
 # shellcheck disable=SC2034  # read by whatever sourced this, which shellcheck cannot see
 declare -A KGSM_UNIT_PKG=()
 
 kgsm_scan() {
     KGSM_PKGS=() KGSM_READY=() KGSM_BLOCKED=() KGSM_OPTIN=() KGSM_WAITING=() KGSM_ADVISORY=()
+    KGSM_HANDOFF=()
     KGSM_UNIT_PKG=()
 
-    local pkg envfile keys unit incomplete policy
+    local pkg envfile keys unit incomplete policy pwfile
     local pkgs=() units=() envfiles=()
 
     kgsm_read_lines pkgs "$(kgsm_packages)"
@@ -152,6 +165,14 @@ kgsm_scan() {
                 KGSM_ADVISORY+=("${envfile}|${keys}")
             fi
         done
+
+        # A password the package minted for the first person to sign in. It exists only between the
+        # first start that created that account and the person collecting it, so its presence is the
+        # whole signal — on a node past that point there is no file and the report says nothing.
+        pwfile="$(kgsm_admin_password_file "$pkg")"
+        if [[ -f "$pwfile" ]]; then
+            KGSM_HANDOFF+=("${pwfile}|${pkg}")
+        fi
 
         for unit in "${units[@]}"; do
             policy="$(kgsm_unit_policy "$unit")"

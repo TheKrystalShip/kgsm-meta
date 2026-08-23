@@ -69,6 +69,14 @@ be filled in later. No package may carry a credential, and `kgsm-node-status` re
 from the keys that actually block a unit — a host whose people sign in with a KGSM password needs
 nothing in it.
 
+**A secret a service mints for itself is reported, never left to be discovered.** A package that
+creates the first administrator on its first start writes that one-time password to
+`/var/lib/<package>/initial-admin-password`, and `kgsm-node-status` names the file for as long as it
+is there — read it as root, sign in, change the password, delete it. A key a service can generate for
+itself is commented out in its env example instead of shipped blank, and the readiness scan counts
+only an uncommented blank key, so such a unit is ready on a fresh node with nothing asked of a
+person. What remains in the report is the credentials only a person can supply.
+
 ## Enabling and starting: what happens where, and why
 
 The split is not stylistic. `systemctl preset` is symlink manipulation on disk and works with no
