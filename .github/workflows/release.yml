@@ -8,7 +8,7 @@ name: release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', 'keyring-v*']
   workflow_dispatch:
 
 permissions:
@@ -20,6 +20,10 @@ env:
 
 jobs:
   build:
+    # This repo also publishes a package on its own tag prefix — see the job at the end. That tag
+    # does not start with `v`, so this one condition keeps the main pair off it, and `package`
+    # skips with it because it needs this job.
+    if: github.ref_type != 'tag' || startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -107,3 +111,65 @@ jobs:
         with:
           name: packages
           path: packaging/*.pkg.tar.zst*
+
+  package-keyring:
+    # Its own tag, because its version is not this repo's release line. The main build/package pair
+    # skips this tag on the `v`-prefix condition above, and this job skips every other one.
+    if: startsWith(github.ref_name, 'keyring-v')
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Provision the container
+        run: pacman -Sy --noconfirm --needed git nodejs rsync gnupg github-cli
+
+      - uses: actions/checkout@v7
+
+      # packaging/keyring/PKGBUILD declares its pkgver literally and reads no deploy/version.sh, so the
+      # assertion is against that literal. A mismatch would publish a package whose name disagrees
+      # with what it contains.
+      - name: Verify the tag matches the declared version
+        run: |
+          declared="$(sed -n 's/^pkgver=//p' packaging/keyring/PKGBUILD | head -1)"
+          tag="${GITHUB_REF_NAME#keyring-v}"
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag keyring-v${tag} but packaging/keyring/PKGBUILD declares ${declared}"
+            exit 1
+          fi
+          echo "version ${declared}"
+
+      # makepkg refuses to run as root, and root-owned sources are unreadable to the build user.
+      - name: Create the build user
+        run: |
+          useradd -m builder
+          chown -R builder:builder .
+
+      - name: Import the packaging key
+        env:
+          KEY: ${{ secrets.KGSM_PACKAGING_KEY }}
+        run: |
+          printf '%s' "$KEY" | runuser -u builder -- gpg --batch --import
+          runuser -u builder -- bash -c \
+            "printf '%s:6:\n' '$SIGN_KEY' | gpg --batch --import-ownertrust"
+
+      - name: Package and sign
+        run: |
+          runuser -u builder -- bash -lc \
+            'cd packaging/keyring && makepkg --sign --key '"$SIGN_KEY"' --nodeps -f --noconfirm'
+
+      - name: Verify the signature before publishing anything
+        run: |
+          cd packaging/keyring
+          for p in *.pkg.tar.zst; do
+            runuser -u builder -- gpg --verify "${p}.sig" "$p"
+            echo "signed: $p"
+          done
+
+      - name: Publish to this repo's release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                 --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
+            packaging/keyring/*.pkg.tar.zst packaging/keyring/*.pkg.tar.zst.sig

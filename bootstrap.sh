@@ -10,6 +10,8 @@
 #   sudo ./bootstrap.sh --repo-only     # wire the repository and the key, install nothing
 #   sudo ./bootstrap.sh --start <pkgs>  # also start anything the install left ready and stopped
 #
+#   KGSM_REPO_URL=file:///srv/staging sudo -E ./bootstrap.sh --all   # install from elsewhere
+#
 # Idempotent and re-runnable: it adds the repository only if absent, imports the key only if the
 # keyring lacks it, and pacman handles an already-installed package.
 #
@@ -24,9 +26,13 @@
 #
 set -euo pipefail
 
-REPO_URL="https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo"
+# KGSM_REPO_URL points this at a different repository — a staging set, or a local directory served
+# as file:// while the packaging itself is under test. It changes where packages come from and
+# nothing about how they are verified: the key check and SigLevel below are the same either way.
+REPO_URL="${KGSM_REPO_URL:-https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo}"
 REPO_NAME="kgsm"
 GROUP="kgsm-node"
+KEYRING_PKG="kgsm-keyring"
 KEY_FPR="B7624435FAC1A8280B280CFBA6FBDB3B724DED1B"
 PACMAN_CONF="/etc/pacman.conf"
 
@@ -47,7 +53,7 @@ for a in "$@"; do
         --start)     START=1 ;;
         --all)       ALL=1 ;;
         --repo-only) REPO_ONLY=1 ;;
-        -h|--help)   sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        -h|--help)   sed -n '3,13p' "$0" | sed 's/^# \?//'; exit 0 ;;
         -*)          err "unknown option: $a"; exit 1 ;;
         *)           SELECTION+=("$a") ;;
     esac
@@ -66,11 +72,30 @@ pacman-key --populate archlinux >/dev/null 2>&1 || true
 if pacman-key --list-keys "$KEY_FPR" >/dev/null 2>&1; then
     log "packaging key already trusted"
 else
+    # THE ONE IRREDUCIBLE MANUAL TRUST STEP. Everything after it is verified; this is what makes
+    # verification mean anything, and it cannot be delivered by a package: pacman refuses a signed
+    # package whose key it has no trust path to, so a kgsm-keyring fetched with `pacman -U` would
+    # be rejected by the very check it exists to enable. Accepting it anyway would mean relaxing
+    # SigLevel for the one package whose whole job is signatures.
+    #
+    # So the first key arrives over TLS from the release, and the fingerprint below is what a person
+    # compares against a copy obtained some other way. From here on, adding or revoking a key is an
+    # ordinary `pacman -Syu` of kgsm-keyring, signed by the key this step trusted.
     log "trusting the packaging key"
+    note "fingerprint: ${KEY_FPR}"
+    note "verify it out of band — this is the root of trust for every package that follows"
     tmpkey="$(mktemp)"
     trap 'rm -f "$tmpkey"' EXIT
     curl -fsSL "${REPO_URL}/${REPO_NAME}.gpg" -o "$tmpkey"
     pacman-key --add "$tmpkey"
+    # curl reporting success proves a file arrived, not which one. Assert the fingerprint is in the
+    # keyring before signing anything: an asset carrying some other key would otherwise be trusted
+    # without comment. Extra keys the file may also carry stay imported and unsigned, which leaves
+    # them with no trust path and no effect.
+    if ! pacman-key --list-keys "$KEY_FPR" >/dev/null 2>&1; then
+        err "the fetched key does not contain ${KEY_FPR} — refusing to trust it"
+        exit 1
+    fi
     # Locally signed, not merely imported: pacman refuses a package whose key it has no trust path
     # to, and this key is on no keyserver, so --recv-keys does not apply.
     pacman-key --lsign-key "$KEY_FPR"
@@ -95,6 +120,17 @@ fi
 
 log "refreshing package databases"
 pacman -Sy --noconfirm >/dev/null
+
+# From here on, key rotation is an upgrade rather than a return to the step above: kgsm-keyring
+# carries the trusted set, its scriptlet runs `pacman-key --populate kgsm`, and it is itself signed
+# by the key just trusted. Installed unconditionally, ahead of the selection — a node that never
+# picks it up would keep exactly one key forever and have no way to be told about a revocation.
+if pacman -Si "$KEYRING_PKG" >/dev/null 2>&1; then
+    log "installing ${KEYRING_PKG} so later key changes arrive as an upgrade"
+    pacman -S --needed --noconfirm "$KEYRING_PKG"
+else
+    warn "${KEYRING_PKG} is not in the repository — key rotation stays a manual pacman-key step"
+fi
 
 if (( REPO_ONLY )); then
     log "repository wired. Available:"

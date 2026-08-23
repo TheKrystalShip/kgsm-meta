@@ -1,0 +1,31 @@
+# Import the fleet's keys into pacman's keyring and locally sign the trusted ones.
+#
+# Guarded on the keyring already being initialised: `pacman-key --populate` needs pacman's own
+# local signing key, which `--init` creates. A chroot, an image build or a `--root` install may have
+# neither, and this must never fail a transaction there — an unpopulated keyring means the next
+# `pacman -Sy` reports an untrusted signature, which is the correct visible outcome rather than a
+# half-installed system.
+
+_populate() {
+    if pacman-key -l >/dev/null 2>&1; then
+        pacman-key --populate kgsm || true
+        pacman-key --updatedb || true
+    else
+        printf '  pacman keyring not initialised — run: pacman-key --init && pacman-key --populate kgsm\n'
+    fi
+}
+
+post_install() {
+    _populate
+}
+
+# On upgrade too, unlike the unit-preset scriptlets: a new version of this package exists precisely
+# because the key set changed, so not importing it would deliver the file and none of its effect.
+post_upgrade() {
+    _populate
+}
+
+post_remove() {
+    printf '  the KGSM packaging keys stay in the pacman keyring; remove them with:\n'
+    printf '    pacman-key --delete B7624435FAC1A8280B280CFBA6FBDB3B724DED1B\n'
+}

@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.2.0]
+
+### Added — `kgsm-keyring`, so rotating a key is an upgrade
+
+`packaging/keyring/` builds `kgsm-keyring`: the public halves of the keys that sign the fleet's
+packages, in the three files `pacman-key` reads — `/usr/share/pacman/keyrings/kgsm.gpg`,
+`kgsm-trusted` and `kgsm-revoked` — with a scriptlet that runs `pacman-key --populate kgsm` on
+install and on every upgrade, guarded on the keyring being initialised so a chroot gets a message
+rather than a failed transaction. Adding or revoking a key is a new version of this package, signed
+by a key the node already trusts.
+
+Nothing depends on it and nothing may: a node's first trust decision cannot come from a package,
+because pacman refuses a signed package whose key it has no trust path to. `bootstrap.sh` makes that
+decision — fetch `kgsm.gpg`, assert the fingerprint is
+`B7624435FAC1A8280B280CFBA6FBDB3B724DED1B`, `pacman-key --add` and `--lsign-key` — and installs this
+package straight after the first `pacman -Sy`. The key is committed armored at `keyring/kgsm.asc` so
+what is trusted is readable in a diff; the PKGBUILD dearmors it and refuses to build a keyring
+carrying a secret key or a fingerprint the trust list does not name.
+
+It versions on its own clock, so it publishes on `keyring-v*` with its own job in the release
+workflow, asserted against the literal `pkgver` in its PKGBUILD.
+
+### Added — `test/acceptance.sh`
+
+The end-to-end proof, as a script rather than a transcript. It boots `archlinux:base-devel` with
+real systemd as PID 1, bind-mounts a repository built from the workspace, runs `bootstrap.sh --all
+--start` against it, and asserts nineteen things about what the node becomes — the units that are
+active, the one that is blocked and on which key, the modes of the three secrets the packages minted
+for themselves, and that the first administrator signs in with the password left in its file. The
+database is signed with the real packaging key rather than the repository being dropped to
+`SigLevel = Never`, so it exercises verification instead of stepping around it. `test/README.md`
+states what it needs and what it measures rather than asserts.
+
+### Added — `KGSM_REPO_URL`
+
+`bootstrap.sh` takes the repository URL from the environment, which is what lets the acceptance test
+point a container at a local `file://` directory. It changes where packages come from and nothing
+about how they are verified.
+
+### Changed — the fetched key is checked before it is signed
+
+`curl` reporting success proves a file arrived, not which one. `bootstrap.sh` asserts the
+fingerprint is in the keyring before `--lsign-key`, and prints it for a person to compare against a
+copy obtained some other way — this is the one step that is not itself verified, and it is what
+makes verification mean anything.
+
 ## [1.1.0]
 
 ### Added — the first administrator's password is part of the report

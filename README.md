@@ -1,7 +1,8 @@
 # kgsm-meta
 
-Two things live here: the **pacman repository** every KGSM node installs from, and **`kgsm-base`**,
-the package holding what the whole fleet shares and no single component owns.
+Three things live here: the **pacman repository** every KGSM node installs from, **`kgsm-base`**,
+the package holding what the whole fleet shares and no single component owns, and
+**`kgsm-keyring`**, the keys that sign it all.
 
 The packages, their signatures and the repository database are **release assets** on the `repo`
 tag. That tag never moves; its assets are replaced in place on every publish, so the URL a node is
@@ -11,7 +12,9 @@ from there.
 
 ## Using it on a node
 
-Trust the packaging key, then add the repository:
+Trust the packaging key, then add the repository. This is the **one step that is not itself
+verified** — everything after it is — so compare the fingerprint against a copy obtained some other
+way before signing it:
 
 ```bash
 curl -fsSL https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo/kgsm.gpg \
@@ -27,9 +30,11 @@ SigLevel = Required DatabaseRequired
 Server = https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo
 ```
 
-Then `sudo pacman -Sy` and install the components this node runs. Every component belongs to the
-`kgsm-node` group, so `pacman -S kgsm-node` lists them and takes a selection. `bootstrap.sh` does
-all of the above in one command.
+Then `sudo pacman -Sy`, `sudo pacman -S kgsm-keyring` so later key changes arrive as an upgrade, and
+install the components this node runs. Every component belongs to the `kgsm-node` group, so
+`pacman -S kgsm-node` lists them and takes a selection. `bootstrap.sh` does all of the above in one
+command, and honours `KGSM_REPO_URL` for a repository somewhere other than the release assets —
+which changes where packages come from and nothing about how they are verified.
 
 After the transaction, every unit is enabled or left off per policy, everything that needs no
 credential is running, and the operator is told the exact keys still waiting on a person. Ask again
@@ -38,6 +43,32 @@ at any time:
 ```bash
 kgsm-node-status
 ```
+
+## `kgsm-keyring`
+
+The public halves of the keys that sign the fleet's packages, in the three files `pacman-key` reads:
+`/usr/share/pacman/keyrings/kgsm.gpg`, `kgsm-trusted` (fingerprint and trust level) and
+`kgsm-revoked` (empty while no key has been retired — it ships anyway, because a file that first
+appears at the moment of a revocation is a file nobody has ever exercised). Its scriptlet runs
+`pacman-key --populate kgsm` on install and on every upgrade, guarded on the keyring being
+initialised so a chroot or an image build gets a message instead of a failed transaction.
+
+It exists so that **key rotation is a package upgrade**. Adding or revoking a key becomes a new
+version of this package, signed by a key the node already trusts and delivered by `pacman -Syu`.
+
+**Nothing depends on it, and nothing may.** A node's first trust decision cannot come from a package:
+pacman refuses a signed package whose key it has no trust path to, so `kgsm-keyring` would be
+rejected by exactly the check it exists to enable, and accepting it anyway would mean relaxing
+`SigLevel` for the one package whose whole job is signatures. `bootstrap.sh` makes that first
+decision — fetch the public key over TLS, assert the fingerprint, `pacman-key --add` and
+`--lsign-key` — and installs this package straight afterwards so every later change rides pacman.
+
+It versions on its own clock, so it has its own directory (`packaging/keyring/`) rather than being a
+second package in `kgsm-base`'s PKGBUILD, which would share one `pkgver`. Its tag prefix is
+`keyring-v*`, and the release workflow's `package-keyring` job asserts the tag against the literal
+`pkgver` in that PKGBUILD. The key itself is committed **armored**, at `keyring/kgsm.asc`, so what
+is being trusted is readable in a diff; the PKGBUILD dearmors it and refuses to build a keyring
+carrying a secret key or a fingerprint the trust list does not name.
 
 ## `kgsm-base`
 
@@ -125,6 +156,10 @@ prints the pacman-safe form. The PKGBUILD asks for it rather than restating one,
 other repo. `CHANGELOG.md` carries an entry per release. A `v*` tag matching `VERSION` builds,
 signs and publishes the package — the workflow refuses a tag that disagrees.
 
+`kgsm-keyring` is outside that line. Its `pkgver` is declared literally in
+`packaging/keyring/PKGBUILD` and moves when a key moves, so it publishes on `keyring-v*` and is
+asserted against that literal.
+
 The release workflow is **generated**: edit `tks/scripts/ci-template/` and re-run `vendor-ci.sh`,
 never `.github/workflows/release.yml` here. `kgsm-base` builds nothing, so its build job is
 `shellcheck` over the three shell payloads and `bootstrap.sh`.
@@ -139,5 +174,10 @@ would take whichever of `repo` and the newest `v*` GitHub currently calls latest
 ## What is here
 
 No component source. Each is built, packaged and signed by its own project's CI, which publishes
-here. Source lives in the `kgsm-*` repositories under the same organisation. `bootstrap.sh` and the
-`base/` payload are the exceptions — they belong to the fleet rather than to any one component.
+here. Source lives in the `kgsm-*` repositories under the same organisation. `bootstrap.sh`, the
+`base/` payload and the `keyring/` key material are the exceptions — they belong to the fleet rather
+than to any one component.
+
+`test/acceptance.sh` proves the whole mechanism end-to-end: it builds the workspace's packages into
+a local repository, boots an Arch container with real systemd, runs `bootstrap.sh` against that
+repository, and asserts what the node ends up running. `test/README.md` states what it needs.

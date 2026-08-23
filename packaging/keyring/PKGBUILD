@@ -1,0 +1,74 @@
+# Maintainer: Cristian Moraru <info@thekrystalship.com>
+#
+# Build from this directory:  cd packaging/keyring && makepkg
+#
+# kgsm-keyring — the public halves of the keys that sign the fleet's packages, in the form
+# pacman-key reads. It is the same shape archlinux-keyring has: a keyring file, a trust list, a
+# revocation list, and a scriptlet that runs `pacman-key --populate`.
+#
+# It exists so that key rotation is a package upgrade. A node's very first trust decision cannot
+# come from a package — pacman refuses a signed package whose key it has no trust path to, so the
+# keyring package itself would be unverifiable. bootstrap.sh makes that first decision by fetching
+# the public key over TLS and running `pacman-key --add` + `--lsign-key`. Every key added or
+# revoked AFTER that arrives here, signed by a key the node already trusts, through `pacman -Syu`.
+#
+# It versions on its own clock, which is why it is a separate directory rather than a second
+# package in kgsm-base's PKGBUILD: a split PKGBUILD shares one pkgver, and the set of trusted keys
+# moves when keys move and not when the base payload does.
+#
+# ⚠ kgsm-base does NOT depend on this, and nothing else may either. A dependency would put the
+# keyring inside the transaction it is supposed to have verified.
+
+pkgname=kgsm-keyring
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="KGSM fleet packaging keys, in the form pacman-key reads"
+arch=('any')
+url="https://github.com/TheKrystalShip/kgsm-meta"
+license=('GPL-3.0-or-later')
+# Not in groups=('kgsm-node'): it is not a component a node chooses to run. bootstrap.sh installs
+# it alongside whatever was selected.
+options=('!debug')
+depends=('pacman')
+# gpg dearmors the committed ASCII key into the binary form pacman-key imports.
+makedepends=('gnupg')
+install="${pkgname}.install"
+
+_keyring() { printf '%s' "${startdir}/../../keyring"; }
+
+build() {
+    # The key is committed armored so a reader can see what is being trusted in a diff. pacman-key
+    # imports either form, but the binary one is what archlinux-keyring ships and what
+    # `pacman-key --populate` is tested against, so convert rather than install the text.
+    gpg --dearmor < "$(_keyring)/kgsm.asc" > kgsm.gpg
+    [[ -s kgsm.gpg ]]
+}
+
+check() {
+    # A keyring that carries a secret key would leak the signing identity into every node. Assert
+    # the export is public-only, and that it is the fingerprint the trust list names.
+    ! gpg --show-keys --with-colons kgsm.gpg | grep -q '^sec'
+    local fpr
+    fpr="$(gpg --show-keys --with-colons kgsm.gpg | awk -F: '/^fpr/ {print $10; exit}')"
+    grep -q "^${fpr}:" "$(_keyring)/kgsm-trusted"
+}
+
+package() {
+    local keyring; keyring="$(_keyring)"
+
+    install -Dm644 kgsm.gpg "${pkgdir}/usr/share/pacman/keyrings/kgsm.gpg"
+
+    # `<fingerprint>:<ownertrust>:` — 4 is full trust, the level archlinux-keyring gives its own
+    # master keys. `pacman-key --populate kgsm` locally signs everything listed here, which is what
+    # gives pacman a trust path to a signature made by the key.
+    install -Dm644 "${keyring}/kgsm-trusted" \
+        "${pkgdir}/usr/share/pacman/keyrings/kgsm-trusted"
+
+    # Empty while no key has been retired. It ships anyway: --populate reads it, and a file that
+    # only appears at the moment of a revocation is a file nobody has ever exercised.
+    install -Dm644 "${keyring}/kgsm-revoked" \
+        "${pkgdir}/usr/share/pacman/keyrings/kgsm-revoked"
+
+    install -Dm644 "${startdir}/../../LICENSE" \
+        "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

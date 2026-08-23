@@ -1,0 +1,11 @@
+# makepkg's working directories and output, for both PKGBUILD directories here. Each pattern is
+# anchored: a slashless rule matches at every depth, which is how a source directory gets untracked
+# without anybody noticing.
+/packaging/pkg/
+/packaging/src/
+/packaging/*.pkg.tar.zst
+/packaging/*.pkg.tar.zst.sig
+/packaging/keyring/pkg/
+/packaging/keyring/src/
+/packaging/keyring/*.pkg.tar.zst
+/packaging/keyring/*.pkg.tar.zst.sig
