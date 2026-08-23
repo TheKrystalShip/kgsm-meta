@@ -14,7 +14,7 @@
 pkgname=kgsm-base
 # A placeholder: pkgver() below replaces it with what deploy/version.sh reports, so the number is
 # declared in exactly one place and this file never carries a copy that can fall behind.
-pkgver=1.1.0
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="KGSM shared base — the service account, state tree, unit policy and node readiness tools"
 arch=('any')
@@ -25,7 +25,14 @@ options=('!debug')
 
 # systemd for sysusers/tmpfiles/preset and the systemctl the tools ask; pacman because the whole
 # readiness derivation is a query against what pacman installed rather than a list kept in a file.
-depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils')
+#
+# kgsm-keyring is here so that a node carrying any KGSM package at all takes key rotation with its
+# ordinary `pacman -Syu` — every unit-shipping package depends on this one, so this single edge
+# reaches the whole fleet. It is safe because it is not the node's FIRST trust decision: by the time
+# pacman resolves this dependency the packaging key is already in the keyring and locally signed, so
+# kgsm-keyring verifies like any other package. The step that cannot be a dependency is the one
+# before all of this — `pacman-key --add` + `--lsign-key`, which the README carries.
+depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils' 'kgsm-keyring')
 
 # The shared sign-in file is the one thing here a person edits. backup=() is pacman's version of
 # create-if-absent-never-clobber: an upgrade writes .pacnew beside an edited file, never over it.

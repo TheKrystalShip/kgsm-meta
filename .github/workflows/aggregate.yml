@@ -1,0 +1,62 @@
+# Rebuild the fleet's pacman repository from what every project has published.
+#
+# This is the whole distribution path's second half: a project's own release workflow builds, signs
+# and publishes its package to its own release, and this collects the newest of each into the
+# database nodes install from. No person and no workstation sits between the two.
+#
+# Unlike release.yml, this file is NOT generated — it exists in this repo only, because there is one
+# aggregation point for the fleet.
+name: aggregate
+
+on:
+  # Fired by every repo's release workflow as its last step. Best-effort there: a repo whose
+  # KGSM_META_DISPATCH_TOKEN secret is absent says so and exits 0, and the schedule below covers it.
+  repository_dispatch:
+    types: [package-released]
+  workflow_dispatch:
+  # The guarantee that needs nothing configured anywhere: a release reaches the fleet within this
+  # window whether or not a dispatch arrived. ci/aggregate.sh uploads nothing when the package set
+  # is unchanged, so a run with no work is cheap.
+  schedule:
+    - cron: '*/15 * * * *'
+
+# Writing this repo's own release assets. Reading a sibling's public release needs nothing more.
+permissions:
+  contents: write
+
+# Two runs rebuilding the same database would race on the upload, and the loser would serve a
+# database that names packages the winner also published — harmless but pointless. Let the later one
+# wait rather than cancelling it: a dispatch that arrives while a scheduled run is halfway through
+# must still see the release it was fired for.
+concurrency:
+  group: kgsm-repo-aggregate
+  cancel-in-progress: false
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    # base, not base-devel: nothing is built here. repo-add, repo-remove, vercmp and bsdtar all come
+    # with pacman itself, and the schedule pulls this image ninety-six times a day.
+    container: archlinux:base
+    steps:
+      # The container has neither git nor node, and every JavaScript action needs node present in
+      # the container it runs in — so this plain shell step has to come before any `uses:`.
+      - name: Provision the container
+        run: pacman -Sy --noconfirm --needed git nodejs gnupg github-cli
+
+      - uses: actions/checkout@v7
+
+      # repo-add signs the database it builds, so the secret half has to be here. The packages
+      # themselves arrive already signed by the workflow that built each one.
+      - name: Import the packaging key
+        env:
+          KEY: ${{ secrets.KGSM_PACKAGING_KEY }}
+          SIGN_KEY: B7624435FAC1A8280B280CFBA6FBDB3B724DED1B
+        run: |
+          printf '%s' "$KEY" | gpg --batch --import
+          printf '%s:6:\n' "$SIGN_KEY" | gpg --batch --import-ownertrust
+
+      - name: Aggregate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ci/aggregate.sh

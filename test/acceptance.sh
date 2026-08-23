@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 #
-# acceptance.sh — prove that a fresh Arch host becomes a running KGSM node with no command but
-# bootstrap.sh.
+# acceptance.sh — prove that a fresh Arch host becomes a running KGSM node with nothing but the
+# commands the README gives a person.
 #
 #   test/acceptance.sh                  # build the workspace's packages, then test
 #   test/acceptance.sh --repo <dir>     # test a repository directory that already exists
 #   test/acceptance.sh --published      # test the PUBLISHED repository on GitHub Releases —
-#                                       # bootstrap.sh, keyring and packages all fetched from the
-#                                       # release, exactly the path a real node takes
+#                                       # the key and every package fetched from the release,
+#                                       # exactly the path a real node takes
 #   test/acceptance.sh --keep           # leave the container up for inspection
+#
+# The install block is EXTRACTED FROM README.md and run as it is written, so a README that drifts
+# from what works fails this test rather than a copy of it kept here. `--published` runs it verbatim;
+# the local modes rewrite the release URL to the file:// repository under test, which changes where
+# packages come from and nothing about how they are verified.
 #
 # What it asserts, in an Arch container running real systemd as PID 1:
 #
@@ -28,6 +33,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "${HERE}/../.." && pwd)"
+README="${HERE}/../README.md"
 IMAGE="archlinux:base"
 CONTAINER="kgsm-acceptance"
 
@@ -55,7 +61,7 @@ while (( $# )); do
         --repo) REPO_DIR="$2"; shift 2 ;;
         --published) PUBLISHED=1; shift ;;
         --keep) KEEP=1; shift ;;
-        -h|--help) sed -n '3,28p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        -h|--help) sed -n '3,32p' "$0" | sed 's/^# \?//'; exit 0 ;;
         *) err "unknown option: $1"; exit 1 ;;
     esac
 done
@@ -67,12 +73,34 @@ docker info >/dev/null 2>&1 || {
     exit 1
 }
 
+# ---------------------------------------------------------------------------- the documented block
+#
+# The README marks the block a person is told to run with an HTML comment, and everything between
+# the next pair of fences is it. Extracting rather than restating is the whole point: the test can
+# only pass against a README that still works.
+
+RELEASE_URL="https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo"
+MARKER='<!-- node-install -->'
+
+INSTALL_BLOCK="$(awk -v marker="$MARKER" '
+    $0 == marker { found = 1; next }
+    found && /^```/ { if (inblock) exit; inblock = 1; next }
+    inblock { print }
+' "$README")"
+
+[[ -n "$INSTALL_BLOCK" ]] || {
+    err "no install block in ${README} — expected a fenced block after ${MARKER}"
+    exit 1
+}
+grep -q "$RELEASE_URL" <<< "$INSTALL_BLOCK" || {
+    err "the README's install block does not name ${RELEASE_URL}"
+    exit 1
+}
+
 # ------------------------------------------------------------------------------- the repository
 
-# --published needs no repository on disk: the container pulls bootstrap.sh, the key and every
-# package from the release over TLS, the same way a real node does.
-RELEASE_URL="https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo"
-
+# --published needs no repository on disk: the container fetches the key and every package from the
+# release over TLS, the same way a real node does.
 if (( ! PUBLISHED )) && [[ -z "$REPO_DIR" ]]; then
     log "building the workspace's packages into a local repository"
     out="$("${WORKSPACE}/scripts/publish-repo.sh" --dry-run --keep 2>&1)" || {
@@ -86,15 +114,27 @@ fi
 
 if (( PUBLISHED )); then
     log "repository: ${RELEASE_URL} (published)"
+    SOURCE_URL="$RELEASE_URL"
 else
     [[ -f "${REPO_DIR}/kgsm.db" ]] || { err "${REPO_DIR} holds no kgsm.db"; exit 1; }
     log "repository: ${REPO_DIR}"
+    SOURCE_URL="file:///srv/kgsm"
 
     # pacman downloads as an unprivileged user (`alpm`), even over file://. A directory mktemp made
     # is 0700 and owned by a uid the container does not have, so the sync fails with "Could not open
     # file" and nothing says why. World-readable is what a served repository is anyway.
     chmod -R a+rX "$REPO_DIR"
 fi
+
+# One substitution covers both places the URL appears — the key fetched with curl, which reads
+# file:// too, and the Server line pacman is given.
+INSTALL_SCRIPT="${INSTALL_BLOCK//${RELEASE_URL}/${SOURCE_URL}}"
+
+# The one thing this changes about the commands themselves. pacman asks a person to confirm the
+# transaction and treats an unanswerable prompt as a refusal — measured: it exits 1 with the answer
+# unread — so a `pacman -S…` line needs --noconfirm to mean the same thing with nobody at the
+# keyboard. Nothing else is rewritten; the block is otherwise run as it is written.
+INSTALL_SCRIPT="$(sed -E 's/^(pacman -S[a-z]*)( |$)/\1 --noconfirm\2/' <<< "$INSTALL_SCRIPT")"
 
 # ---------------------------------------------------------------------------------- the container
 
@@ -133,25 +173,31 @@ baseline="$(docker exec "$CONTAINER" systemctl list-units --state=failed --no-le
     | awk '{print $1}' | paste -sd' ')"
 note "failed before installing anything: ${baseline:-none}"
 
-# ------------------------------------------------------------------------------------- bootstrap
+# ------------------------------------------------------------------------------------- the install
 
-if (( PUBLISHED )); then
-    # The release's own bootstrap.sh, fetched the way its README tells a person to — no override,
-    # so it runs against the published repository and the published keyring.
-    BOOTLOG="$(mktemp /tmp/kgsm-acceptance-bootstrap.XXXXXX.log)"
-    log "running the release's bootstrap.sh against the published repository"
-    docker exec "$CONTAINER" bash -c \
-        "curl -fsSL '${RELEASE_URL}/bootstrap.sh' -o /tmp/kgsm-bootstrap.sh \
-         && bash /tmp/kgsm-bootstrap.sh --all --start" >"$BOOTLOG" 2>&1
-    boot_rc=$?
-else
-    log "running bootstrap.sh against the local repository"
-    docker exec -e KGSM_REPO_URL=file:///srv/kgsm "$CONTAINER" \
-        bash /srv/kgsm/bootstrap.sh --all --start >"${REPO_DIR}/../acceptance-bootstrap.log" 2>&1
-    boot_rc=$?
-    BOOTLOG="${REPO_DIR}/../acceptance-bootstrap.log"
+INSTALLLOG="$(mktemp /tmp/kgsm-acceptance-install.XXXXXX.log)"
+
+log "running the README's install block"
+# `set -euo pipefail` is the test's, not the README's: a person watching a terminal sees a failing
+# command and stops, and this is how a script gets the same answer.
+#
+# It is written to a file and run from there rather than piped into `bash -s`, so that the block's
+# own commands keep a stdin of their own — `pacman-key --add -` reads the key off a pipe, and a
+# script that IS stdin leaves them reading the rest of itself.
+{
+    printf 'set -euo pipefail\n'
+    printf '%s\n' "$INSTALL_SCRIPT"
+} | docker exec -i "$CONTAINER" tee /tmp/kgsm-install.sh >/dev/null
+docker exec "$CONTAINER" bash /tmp/kgsm-install.sh >"$INSTALLLOG" 2>&1
+install_rc=$?
+
+if (( install_rc == 0 )); then
+    # The README's second command, with the prompt answered the only way a script can: pacman's own
+    # default for a group selection is every member, so --noconfirm installs all of kgsm-node.
+    log "installing the kgsm-node group"
+    docker exec "$CONTAINER" pacman -S --noconfirm kgsm-node >>"$INSTALLLOG" 2>&1
+    install_rc=$?
 fi
-[[ -f "$BOOTLOG" ]] || BOOTLOG=/dev/null
 
 # A .NET service takes a moment to bind; asserting the instant the transaction returns would measure
 # start-up latency rather than whether the node works.
@@ -166,7 +212,7 @@ done
 echo
 log "results"
 
-expect "$boot_rc" 0 "bootstrap.sh exits 0"
+expect "$install_rc" 0 "the README's commands exit 0"
 
 # The signature path. A database that verified is the whole reason the packages could install.
 if docker exec "$CONTAINER" grep -q 'SigLevel = Required DatabaseRequired' /etc/pacman.conf; then
@@ -237,6 +283,17 @@ fi
 
 # ------------------------------------------------------------------- measured, and not asserted
 #
+# Where kgsm-keyring came from. Nothing installs it by name — a repository whose kgsm-base declares
+# the dependency delivers it, and an older one does not — so this is reported rather than asserted,
+# and the report says which of the two the run was against.
+reason="$(docker exec "$CONTAINER" bash -c \
+    "pacman -Qi kgsm-keyring 2>/dev/null | sed -n 's/^Install Reason *: *//p'")"
+if [[ -n "$reason" ]]; then
+    info "kgsm-keyring is installed (${reason}) — no command named it"
+else
+    info "kgsm-keyring is not installed — this repository's kgsm-base does not depend on it"
+fi
+
 # The network meter loads an eBPF program and attaches it to a cgroup. A container may or may not
 # have what that needs, and forcing it to pass would turn a real prerequisite into a hidden one.
 # Report what happened and why instead.
@@ -249,9 +306,9 @@ if [[ "$s" == active ]]; then
         | grep -c '^>> attaching ingress')"
     info "kgsm-net-meter.service is active — eBPF program attached (${tries:-0} successful pass(es))"
 else
-    reason="$(docker exec "$CONTAINER" journalctl -u kgsm-net-meter.service --no-pager -o cat 2>/dev/null \
+    nm_reason="$(docker exec "$CONTAINER" journalctl -u kgsm-net-meter.service --no-pager -o cat 2>/dev/null \
         | grep '!!' | tail -1 | sed 's/^!! *//')"
-    info "kgsm-net-meter.service is ${s:-unknown}${reason:+ — ${reason}}"
+    info "kgsm-net-meter.service is ${s:-unknown}${nm_reason:+ — ${nm_reason}}"
 fi
 
 now_failed="$(docker exec "$CONTAINER" systemctl list-units --state=failed --no-legend --plain \
@@ -264,7 +321,7 @@ printf '%s\n' "$status"
 echo
 if (( FAIL )); then
     err "${FAIL} failed, ${PASS} passed"
-    [[ "$BOOTLOG" != /dev/null ]] && note "bootstrap output: ${BOOTLOG}"
+    note "install output: ${INSTALLLOG}"
     exit 1
 fi
 log "all ${PASS} checks passed"

@@ -7,17 +7,19 @@
 # revocation list, and a scriptlet that runs `pacman-key --populate`.
 #
 # It exists so that key rotation is a package upgrade. A node's very first trust decision cannot
-# come from a package — pacman refuses a signed package whose key it has no trust path to, so the
-# keyring package itself would be unverifiable. bootstrap.sh makes that first decision by fetching
-# the public key over TLS and running `pacman-key --add` + `--lsign-key`. Every key added or
-# revoked AFTER that arrives here, signed by a key the node already trusts, through `pacman -Syu`.
+# come from a package — pacman refuses a signed package whose key it has no trust path to, so a
+# keyring fetched before any key is trusted would be unverifiable. That first decision is a person
+# fetching the public key over TLS and running `pacman-key --add` + `--lsign-key`, which the repo's
+# README carries. Every key added or revoked AFTER it arrives here, signed by a key the node already
+# trusts, through `pacman -Syu`.
+#
+# kgsm-base depends on this, which is what puts it on every node without anybody asking for it. The
+# circularity applies only to that first trust: once the packaging key is in the keyring and locally
+# signed, this package verifies like any other and pacman resolving it as a dependency is ordinary.
 #
 # It versions on its own clock, which is why it is a separate directory rather than a second
 # package in kgsm-base's PKGBUILD: a split PKGBUILD shares one pkgver, and the set of trusted keys
 # moves when keys move and not when the base payload does.
-#
-# ⚠ kgsm-base does NOT depend on this, and nothing else may either. A dependency would put the
-# keyring inside the transaction it is supposed to have verified.
 
 pkgname=kgsm-keyring
 pkgver=1.0.0
@@ -26,8 +28,8 @@ pkgdesc="KGSM fleet packaging keys, in the form pacman-key reads"
 arch=('any')
 url="https://github.com/TheKrystalShip/kgsm-meta"
 license=('GPL-3.0-or-later')
-# Not in groups=('kgsm-node'): it is not a component a node chooses to run. bootstrap.sh installs
-# it alongside whatever was selected.
+# Not in groups=('kgsm-node'): it is not a component a node chooses to run. It arrives as a
+# dependency of kgsm-base, which every unit-shipping package depends on.
 options=('!debug')
 depends=('pacman')
 # gpg dearmors the committed ASCII key into the binary form pacman-key imports.

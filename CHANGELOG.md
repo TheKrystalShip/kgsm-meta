@@ -1,5 +1,60 @@
 # Changelog
 
+## [1.3.0]
+
+### Changed — `kgsm-base` depends on `kgsm-keyring`
+
+Key rotation now reaches a node with nothing asked of it. Every unit-shipping package depends on
+`kgsm-base`, so one edge puts the keyring on every node in the fleet and each later `pacman -Syu`
+carries whatever the trusted set has become.
+
+The rule this replaces — *nothing depends on the keyring, and nothing may* — was drawn too wide. The
+circularity is real only for a node's **first** trust decision: pacman refuses a signed package whose
+key it has no trust path to, so a keyring fetched before any key is trusted is unverifiable. Once the
+packaging key is in the keyring and locally signed, `kgsm-keyring` verifies like any other package
+and resolving it as a dependency is ordinary. That first decision stays where it has to be — a person
+running `pacman-key --add` and `--lsign-key` — and the acceptance test measures the difference: no
+command names `kgsm-keyring`, and it is installed as a dependency anyway.
+
+### Removed — `bootstrap.sh`
+
+The README is the installer. Node setup is one root block — `pacman-key --init`, trust the packaging
+key, append `[kgsm]` to `/etc/pacman.conf`, `pacman -Syu` — and then `pacman -S kgsm-node`, whose own
+group prompt is the package selector. Every line `bootstrap.sh` held was pacman's job done a second
+way: the repository stanza, the key import, a selection menu over `pacman -Sg`, and a re-run of the
+hook that had already fired.
+
+Its two load-bearing comments survive as prose in the README: why the first trust cannot be
+delivered by a package, and why no package seeds a credential.
+
+`test/acceptance.sh` extracts that block from `README.md` and runs it, so the documented commands are
+the tested ones and a README that drifts fails the test. The nineteen assertions are unchanged. Local
+modes rewrite the release URL to the `file://` repository under test and add `--noconfirm`, because
+pacman treats an unanswerable prompt as a refusal; nothing else about the block is altered.
+
+The `bootstrap.sh` release asset is gone from the `repo` tag, and `publish-repo.sh` no longer
+uploads one. `kgsm.gpg` stays — it is what the first trust decision fetches.
+
+### Added — `ci/aggregate.sh` and the `aggregate` workflow
+
+The fleet's database rebuilds itself. `.github/workflows/aggregate.yml` runs `ci/aggregate.sh` on a
+`repository_dispatch` from any project's release, on `workflow_dispatch`, and every fifteen minutes;
+it seeds a staging directory from the `repo` tag's current assets, overlays the newest release of
+every sibling across each of its tag families, selects the newest of each package name with
+`vercmp`, rebuilds and signs `kgsm.db`, and clobbers the assets on the `repo` tag. Tagging a release
+is now the whole of shipping it.
+
+Seeding from the current assets is what keeps a package no per-repo release supersedes — `libdave`,
+built by hand — in the database. The run is idempotent: the rebuilt set is compared with the served
+one by package name and version rather than by bytes, which differ on every rebuild, and an
+unchanged set uploads nothing. Only package files the seed did not already contain are uploaded, so
+a run that collected one new package does not re-push the rest.
+
+Each repo's release workflow fires the dispatch as a best-effort last step, using the
+`KGSM_META_DISPATCH_TOKEN` organisation secret — a cross-repo dispatch cannot use a workflow's own
+`GITHUB_TOKEN`. Where that secret is absent the step says so and exits 0, and the schedule covers
+the release within fifteen minutes.
+
 ## [1.2.0]
 
 ### Added — `kgsm-keyring`, so rotating a key is an upgrade
