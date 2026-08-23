@@ -25,7 +25,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "${HERE}/../.." && pwd)"
-IMAGE="archlinux:base-devel"
+IMAGE="archlinux:base"
 CONTAINER="kgsm-acceptance"
 
 log()  { printf '\033[1;34m>> %s\033[0m\n' "$*"; }
@@ -214,9 +214,18 @@ fi
 # have what that needs, and forcing it to pass would turn a real prerequisite into a hidden one.
 # Report what happened and why instead.
 s="$(docker exec "$CONTAINER" systemctl is-active kgsm-net-meter.service 2>/dev/null)"
-reason="$(docker exec "$CONTAINER" journalctl -u kgsm-net-meter.service --no-pager -o cat 2>/dev/null \
-    | grep -m1 '!!' | sed 's/^!! *//')"
-info "kgsm-net-meter.service is ${s:-unknown}${reason:+ — ${reason}}"
+if [[ "$s" == active ]]; then
+    # Its first pass fails: attaching needs /sys/fs/cgroup/kgsm.slice, and being ordered after
+    # kgsm-watchdog.service is not the same as after the slice the watchdog creates at runtime. Say
+    # how many passes it took rather than quoting that first failure as if it were the outcome.
+    tries="$(docker exec "$CONTAINER" journalctl -u kgsm-net-meter.service --no-pager -o cat 2>/dev/null \
+        | grep -c '^>> attaching ingress')"
+    info "kgsm-net-meter.service is active — eBPF program attached (${tries:-0} successful pass(es))"
+else
+    reason="$(docker exec "$CONTAINER" journalctl -u kgsm-net-meter.service --no-pager -o cat 2>/dev/null \
+        | grep '!!' | tail -1 | sed 's/^!! *//')"
+    info "kgsm-net-meter.service is ${s:-unknown}${reason:+ — ${reason}}"
+fi
 
 now_failed="$(docker exec "$CONTAINER" systemctl list-units --state=failed --no-legend --plain \
     | awk '{print $1}' | paste -sd' ')"
