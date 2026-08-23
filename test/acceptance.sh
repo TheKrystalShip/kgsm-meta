@@ -5,6 +5,9 @@
 #
 #   test/acceptance.sh                  # build the workspace's packages, then test
 #   test/acceptance.sh --repo <dir>     # test a repository directory that already exists
+#   test/acceptance.sh --published      # test the PUBLISHED repository on GitHub Releases —
+#                                       # bootstrap.sh, keyring and packages all fetched from the
+#                                       # release, exactly the path a real node takes
 #   test/acceptance.sh --keep           # leave the container up for inspection
 #
 # What it asserts, in an Arch container running real systemd as PID 1:
@@ -45,15 +48,18 @@ expect() {
 }
 
 REPO_DIR=""
+PUBLISHED=0
 KEEP=0
 while (( $# )); do
     case "$1" in
         --repo) REPO_DIR="$2"; shift 2 ;;
+        --published) PUBLISHED=1; shift ;;
         --keep) KEEP=1; shift ;;
-        -h|--help) sed -n '3,25p' "$0" | sed 's/^# \?//'; exit 0 ;;
+        -h|--help) sed -n '3,28p' "$0" | sed 's/^# \?//'; exit 0 ;;
         *) err "unknown option: $1"; exit 1 ;;
     esac
 done
+(( PUBLISHED )) && [[ -n "$REPO_DIR" ]] && { err "--published and --repo are mutually exclusive"; exit 1; }
 
 docker info >/dev/null 2>&1 || {
     err "docker is not usable by this account"
@@ -63,7 +69,11 @@ docker info >/dev/null 2>&1 || {
 
 # ------------------------------------------------------------------------------- the repository
 
-if [[ -z "$REPO_DIR" ]]; then
+# --published needs no repository on disk: the container pulls bootstrap.sh, the key and every
+# package from the release over TLS, the same way a real node does.
+RELEASE_URL="https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo"
+
+if (( ! PUBLISHED )) && [[ -z "$REPO_DIR" ]]; then
     log "building the workspace's packages into a local repository"
     out="$("${WORKSPACE}/scripts/publish-repo.sh" --dry-run --keep 2>&1)" || {
         printf '%s\n' "$out" | tail -30 >&2
@@ -74,13 +84,17 @@ if [[ -z "$REPO_DIR" ]]; then
     [[ -d "$REPO_DIR" ]] || { err "could not find the staging directory publish-repo.sh kept"; exit 1; }
 fi
 
-[[ -f "${REPO_DIR}/kgsm.db" ]] || { err "${REPO_DIR} holds no kgsm.db"; exit 1; }
-log "repository: ${REPO_DIR}"
+if (( PUBLISHED )); then
+    log "repository: ${RELEASE_URL} (published)"
+else
+    [[ -f "${REPO_DIR}/kgsm.db" ]] || { err "${REPO_DIR} holds no kgsm.db"; exit 1; }
+    log "repository: ${REPO_DIR}"
 
-# pacman downloads as an unprivileged user (`alpm`), even over file://. A directory mktemp made is
-# 0700 and owned by a uid the container does not have, so the sync fails with "Could not open file"
-# and nothing says why. World-readable is what a served repository is anyway.
-chmod -R a+rX "$REPO_DIR"
+    # pacman downloads as an unprivileged user (`alpm`), even over file://. A directory mktemp made
+    # is 0700 and owned by a uid the container does not have, so the sync fails with "Could not open
+    # file" and nothing says why. World-readable is what a served repository is anyway.
+    chmod -R a+rX "$REPO_DIR"
+fi
 
 # ---------------------------------------------------------------------------------- the container
 
@@ -98,10 +112,12 @@ docker rm -f "$CONTAINER" >/dev/null 2>&1
 log "booting ${IMAGE} with systemd as PID 1"
 # --cgroupns=private is not a detail: it gives the container its own cgroup root, so a privileged
 # init in here cannot see or act on the host's kgsm.slice and the game servers under it.
+MOUNT=()
+(( ! PUBLISHED )) && MOUNT=(-v "${REPO_DIR}:/srv/kgsm:ro")
 docker run -d --name "$CONTAINER" \
     --privileged --cgroupns=private --stop-signal SIGRTMIN+3 \
     --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
-    -v "${REPO_DIR}:/srv/kgsm:ro" \
+    "${MOUNT[@]}" \
     "$IMAGE" /usr/lib/systemd/systemd >/dev/null || { err "the container did not start"; exit 1; }
 
 for _ in $(seq 1 60); do
@@ -119,11 +135,22 @@ note "failed before installing anything: ${baseline:-none}"
 
 # ------------------------------------------------------------------------------------- bootstrap
 
-log "running bootstrap.sh against the local repository"
-docker exec -e KGSM_REPO_URL=file:///srv/kgsm "$CONTAINER" \
-    bash /srv/kgsm/bootstrap.sh --all --start >"${REPO_DIR}/../acceptance-bootstrap.log" 2>&1
-boot_rc=$?
-BOOTLOG="${REPO_DIR}/../acceptance-bootstrap.log"
+if (( PUBLISHED )); then
+    # The release's own bootstrap.sh, fetched the way its README tells a person to — no override,
+    # so it runs against the published repository and the published keyring.
+    BOOTLOG="$(mktemp /tmp/kgsm-acceptance-bootstrap.XXXXXX.log)"
+    log "running the release's bootstrap.sh against the published repository"
+    docker exec "$CONTAINER" bash -c \
+        "curl -fsSL '${RELEASE_URL}/bootstrap.sh' -o /tmp/kgsm-bootstrap.sh \
+         && bash /tmp/kgsm-bootstrap.sh --all --start" >"$BOOTLOG" 2>&1
+    boot_rc=$?
+else
+    log "running bootstrap.sh against the local repository"
+    docker exec -e KGSM_REPO_URL=file:///srv/kgsm "$CONTAINER" \
+        bash /srv/kgsm/bootstrap.sh --all --start >"${REPO_DIR}/../acceptance-bootstrap.log" 2>&1
+    boot_rc=$?
+    BOOTLOG="${REPO_DIR}/../acceptance-bootstrap.log"
+fi
 [[ -f "$BOOTLOG" ]] || BOOTLOG=/dev/null
 
 # A .NET service takes a moment to bind; asserting the instant the transaction returns would measure
