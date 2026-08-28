@@ -269,6 +269,23 @@ check_mode /var/lib/kgsm-api/initial-admin-password 600 "the first administrator
 check_mode /var/lib/kgsm-api/signing-key            600 "kgsm-api's self-minted signing key"
 check_mode /var/lib/kgsm-assistant/signing-key      600 "the assistant's self-minted signing key"
 
+# The reactor's rules, which exist nowhere in its code: the package ships them beside the binary and
+# the leaf installs them into its own state directory the first time it starts. A node that came up
+# judging nothing would look identical to one that came up correctly until something crashed.
+shipped="$(docker exec "$CONTAINER" sh -c 'ls /opt/kgsm-reactor/rules.d/*.json 2>/dev/null | wc -l')"
+running="$(docker exec "$CONTAINER" sh -c 'ls /var/lib/kgsm-reactor/rules.d/*.json 2>/dev/null | wc -l')"
+if [[ "${shipped:-0}" -gt 0 && "$running" == "$shipped" ]]; then
+    ok "the reactor installed its ${shipped} shipped rule(s) on first start"
+else
+    bad "the reactor ships ${shipped:-0} rule(s) and is running ${running:-0}"
+fi
+
+# And is actually judging by them, rather than holding files it refused. `problems` is the leaf's own
+# word for a rule it could not honour, so an empty one is the only clean answer.
+refused="$(docker exec "$CONTAINER" curl -s --unix-socket /run/kgsm-reactor/status.sock \
+    http://localhost/status 2>/dev/null | grep -o '"problems":\[[^]]*\]')"
+expect "$refused" '"problems":[]' "the reactor honoured every rule it installed"
+
 # The handoff, end to end: the password in that file signs the account in that file in.
 user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
 pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
