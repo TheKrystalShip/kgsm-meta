@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.4.0]
+
+### Added — `setup-node.sh`, one line that configures pacman
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheKrystalShip/kgsm-meta/main/setup-node.sh | sudo bash
+```
+
+It initialises the keyring, fetches the packaging key, reads the fingerprints out of the fetched
+file with `gpg --show-keys` and refuses anything that does not carry the pinned one, locally signs
+it, writes the `[kgsm]` section and runs `pacman -Syu`. Then `pacman -S kgsm-node`, whose group
+prompt is still the whole of the package selection.
+
+It configures pacman and stops there. No unit is written, no component is chosen and no credential
+is invented, so the reasons the previous script was not worth keeping do not apply: it wraps no
+pacman prompt, re-runs no hook and maintains no second list of what a node installs.
+
+Refusing before importing is the difference from doing it by hand. `pacman-key --add` followed by
+`--lsign-key <fingerprint>` also refuses a substituted key, but only after that key is in the
+keyring; reading the fingerprints out of the file first means it never gets there.
+
+What the script cannot do is vouch for itself, and the README says so rather than implying the
+one-liner is equivalent to the by-hand form. Whoever could serve a different key could serve a
+different copy of the script carrying a different fingerprint. The by-hand steps stay in the README
+for the reader who wants that gap closed by comparing the fingerprint out of band.
+
+`exec </dev/null` is load-bearing. Piped into `bash` the script is stdin, so any command inside it
+that read stdin would consume the rest of it — which is also why the key goes to a temporary file
+and never to `pacman-key --add -`.
+
+### Changed — the acceptance test runs the one-liner
+
+The `<!-- node-install -->` block is the `curl … | bash` line, so extracting and running it puts
+`setup-node.sh` under test too, piped in exactly as a person pipes it. `--published` fetches the
+script over the network; the local modes pipe in the checkout's copy and hand it `KGSM_REPO_URL`.
+`sudo` is dropped because the container is root and `archlinux:base` has none.
+
+Two seams are checked before the container boots: `setup-node.sh` must still name the release URL,
+and the README must quote the fingerprint the script pins. The assertions themselves are unchanged.
+
 ## [1.3.0]
 
 ### Changed — `kgsm-base` depends on `kgsm-keyring`

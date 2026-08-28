@@ -14,7 +14,7 @@
 pkgname=kgsm-base
 # A placeholder: pkgver() below replaces it with what deploy/version.sh reports, so the number is
 # declared in exactly one place and this file never carries a copy that can fall behind.
-pkgver=1.3.0
+pkgver=1.4.0
 pkgrel=1
 pkgdesc="KGSM shared base — the service account, state tree, unit policy and node readiness tools"
 arch=('any')

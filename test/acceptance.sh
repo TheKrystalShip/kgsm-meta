@@ -5,15 +5,16 @@
 #
 #   test/acceptance.sh                  # build the workspace's packages, then test
 #   test/acceptance.sh --repo <dir>     # test a repository directory that already exists
-#   test/acceptance.sh --published      # test the PUBLISHED repository on GitHub Releases —
-#                                       # the key and every package fetched from the release,
+#   test/acceptance.sh --published      # test the PUBLISHED repository on GitHub Releases — the
+#                                       # script, the key and every package fetched over the network,
 #                                       # exactly the path a real node takes
 #   test/acceptance.sh --keep           # leave the container up for inspection
 #
 # The install block is EXTRACTED FROM README.md and run as it is written, so a README that drifts
-# from what works fails this test rather than a copy of it kept here. `--published` runs it verbatim;
-# the local modes rewrite the release URL to the file:// repository under test, which changes where
-# packages come from and nothing about how they are verified.
+# from what works fails this test rather than a copy of it kept here. That block fetches
+# setup-node.sh and pipes it into a shell, so the script is under test with it: `--published` fetches
+# it from the repository over TLS, and the local modes pipe in the checkout's copy and hand it
+# KGSM_REPO_URL, which changes where packages come from and nothing about how they are verified.
 #
 # What it asserts, in an Arch container running real systemd as PID 1:
 #
@@ -80,6 +81,8 @@ docker info >/dev/null 2>&1 || {
 # only pass against a README that still works.
 
 RELEASE_URL="https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo"
+SCRIPT_URL="https://raw.githubusercontent.com/TheKrystalShip/kgsm-meta/main/setup-node.sh"
+SETUP="${HERE}/../setup-node.sh"
 MARKER='<!-- node-install -->'
 
 INSTALL_BLOCK="$(awk -v marker="$MARKER" '
@@ -92,8 +95,21 @@ INSTALL_BLOCK="$(awk -v marker="$MARKER" '
     err "no install block in ${README} — expected a fenced block after ${MARKER}"
     exit 1
 }
-grep -q "$RELEASE_URL" <<< "$INSTALL_BLOCK" || {
-    err "the README's install block does not name ${RELEASE_URL}"
+grep -q "$SCRIPT_URL" <<< "$INSTALL_BLOCK" || {
+    err "the README's install block does not name ${SCRIPT_URL}"
+    exit 1
+}
+
+# The block fetches a script, so what the block does is what the script does. These two are the
+# seam between them: a README pointing at a script that no longer names this repository, or a
+# by-hand section quoting a fingerprint the script does not pin, is drift the test refuses.
+[[ -f "$SETUP" ]] || { err "no ${SETUP}"; exit 1; }
+grep -q "$RELEASE_URL" "$SETUP" || { err "setup-node.sh does not name ${RELEASE_URL}"; exit 1; }
+
+SETUP_FPR="$(sed -n "s/^KEY_FINGERPRINT='\\([0-9A-F]*\\)'.*/\\1/p" "$SETUP")"
+[[ -n "$SETUP_FPR" ]] || { err "no KEY_FINGERPRINT in setup-node.sh"; exit 1; }
+grep -q "$SETUP_FPR" "$README" || {
+    err "the README does not quote the fingerprint setup-node.sh pins (${SETUP_FPR})"
     exit 1
 }
 
@@ -126,9 +142,19 @@ else
     chmod -R a+rX "$REPO_DIR"
 fi
 
-# One substitution covers both places the URL appears — the key fetched with curl, which reads
-# file:// too, and the Server line pacman is given.
-INSTALL_SCRIPT="${INSTALL_BLOCK//${RELEASE_URL}/${SOURCE_URL}}"
+# The block fetches setup-node.sh over the network and pipes it into a shell. Locally, the checkout's
+# copy is piped in instead — the same shape, because piping IS the thing under test: a script that is
+# stdin leaves anything reading stdin eating the rest of itself, and this proves setup-node.sh does
+# not. KGSM_REPO_URL is how the script is told which repository to use; nothing inside it is rewritten.
+INSTALL_SCRIPT="$INSTALL_BLOCK"
+if (( ! PUBLISHED )); then
+    INSTALL_SCRIPT="${INSTALL_SCRIPT//curl -fsSL ${SCRIPT_URL}/cat /tmp/setup-node.sh}"
+    INSTALL_SCRIPT="${INSTALL_SCRIPT//| sudo bash/| env KGSM_REPO_URL=${SOURCE_URL} bash}"
+fi
+
+# The container is PID-1 root and archlinux:base ships no sudo, so the one word a person needs and a
+# root shell does not is dropped. Everything else about the line is run as it is written.
+INSTALL_SCRIPT="${INSTALL_SCRIPT//| sudo bash/| bash}"
 
 # The one thing this changes about the commands themselves. pacman asks a person to confirm the
 # transaction and treats an unanswerable prompt as a refusal — measured: it exits 1 with the answer
@@ -184,6 +210,8 @@ log "running the README's install block"
 # It is written to a file and run from there rather than piped into `bash -s`, so that the block's
 # own commands keep a stdin of their own — `pacman-key --add -` reads the key off a pipe, and a
 # script that IS stdin leaves them reading the rest of itself.
+(( PUBLISHED )) || docker exec -i "$CONTAINER" tee /tmp/setup-node.sh >/dev/null < "$SETUP"
+
 {
     printf 'set -euo pipefail\n'
     printf '%s\n' "$INSTALL_SCRIPT"

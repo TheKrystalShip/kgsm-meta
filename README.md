@@ -12,37 +12,14 @@ from there.
 
 ## Installing a node
 
-There is no installer to fetch. A node is a machine that has been told where the fleet's packages
-live and which key signs them; pacman does the rest, and does it the same way it does for every
-other repository on the host.
-
-Run this once, as root — `sudo -i` first if you are not already:
+A node is a machine that has been told where the fleet's packages live and which key signs them;
+pacman does the rest, and does it the same way it does for every other repository on the host. One
+line does the telling:
 
 <!-- node-install -->
 
 ```bash
-# An ISO install arrives with an initialised keyring. A container or a minimal root may not, and
-# --lsign-key needs pacman's own local signing key to exist. Idempotent either way.
-pacman-key --init
-
-# THE ONE STEP THAT IS NOT ITSELF VERIFIED. Everything after it is checked against the key it
-# trusts, which is what makes verification mean anything — so compare this fingerprint against a
-# copy obtained some other way before signing it. curl reporting success proves a file arrived, not
-# which one; --lsign-key names the fingerprint explicitly and fails if the fetched asset carries
-# some other key, so a substituted file is refused rather than trusted without comment.
-curl -fsSL https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo/kgsm.gpg | pacman-key --add -
-pacman-key --lsign-key B7624435FAC1A8280B280CFBA6FBDB3B724DED1B
-
-# Required, not Optional: an unsigned or wrongly-signed package is refused rather than warned about.
-# The tag never moves, so this URL is stable for the life of the fleet.
-cat >> /etc/pacman.conf <<'EOF'
-
-[kgsm]
-SigLevel = Required DatabaseRequired
-Server = https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo
-EOF
-
-pacman -Syu
+curl -fsSL https://raw.githubusercontent.com/TheKrystalShip/kgsm-meta/main/setup-node.sh | sudo bash
 ```
 
 Then install what this node runs:
@@ -71,6 +48,43 @@ kgsm-node-status
 produce a node that starts and is wrong, which is worse than one that has not started yet.
 
 Upgrades from here are `pacman -Syu`, key rotation included.
+
+### What `setup-node.sh` does, and doing it by hand instead
+
+It initialises pacman's keyring, fetches the packaging key, refuses it unless it carries the
+fingerprint written into the script, locally signs it, appends the `[kgsm]` section to
+`/etc/pacman.conf` and runs `pacman -Syu`. It configures pacman and stops there: no unit is written,
+no component is chosen, no credential is invented. `--no-upgrade` stops it before the sync, and
+`KGSM_REPO_URL` points the whole of it at a different repository. Piped into a shell, a flag needs
+`-s --` so bash hands it to the script rather than reading it as its own:
+`curl -fsSL <url> | sudo bash -s -- --no-upgrade`.
+
+**The first step is the one nothing verifies.** Everything pacman fetches afterwards is checked
+against the key trusted here, which is what makes verification mean anything. A script fetched over
+the network cannot vouch for itself, though — whoever could serve a different key could serve a
+different copy of the script, carrying a different fingerprint. Reading it before running it, or
+comparing the fingerprint against a copy obtained some other way, is what closes that gap. As root,
+the same steps are:
+
+```bash
+pacman-key --init
+curl -fsSL https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo/kgsm.gpg | pacman-key --add -
+pacman-key --lsign-key B7624435FAC1A8280B280CFBA6FBDB3B724DED1B
+
+cat >> /etc/pacman.conf <<'EOF'
+
+[kgsm]
+SigLevel = Required DatabaseRequired
+Server = https://github.com/TheKrystalShip/kgsm-meta/releases/download/repo
+EOF
+
+pacman -Syu
+```
+
+`--lsign-key` names the fingerprint explicitly and fails if the fetched asset carries some other key,
+so a substituted file is refused rather than trusted without comment. `SigLevel` is `Required`, not
+`Optional`: an unsigned or wrongly-signed package is refused rather than warned about. The tag never
+moves, so that URL is stable for the life of the fleet.
 
 ## `kgsm-keyring`
 

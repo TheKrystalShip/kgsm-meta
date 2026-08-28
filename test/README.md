@@ -17,15 +17,27 @@ The install block is extracted from `README.md` — the fenced block after the `
 marker — and executed. A README that drifts from what works fails this test, which is the only way a
 document stays true without somebody remembering to check it.
 
-Two things about the extracted block differ from what a person types, and nothing else does:
+That block fetches `setup-node.sh` and pipes it into a shell, so the script is under test with it.
+`--published` fetches it over the network the way a node does; the local modes pipe in the
+checkout's copy. Piping rather than running a file is the shape that matters: a script that is
+itself stdin leaves any command reading stdin eating the rest of it, and this is what proves
+`setup-node.sh` does not.
 
-- **The repository URL**, in the local modes only. `--repo` and the default rewrite the release URL
-  to the `file://` directory under test, which covers both the key fetched with `curl` and the
-  `Server` line. `--published` runs the block with the URL untouched.
+Three things about the run differ from what a person types, and nothing else does:
+
+- **The repository URL**, in the local modes only. `--repo` and the default hand the script
+  `KGSM_REPO_URL` pointing at the `file://` directory under test, which covers both the key it
+  fetches and the `Server` line it writes. `--published` leaves it alone. Nothing inside the script
+  is rewritten.
+- **`sudo`.** The container is PID-1 root and `archlinux:base` ships no sudo, so the one word a
+  person needs and a root shell does not is dropped from the line.
 - **`--noconfirm` on `pacman -S…`**. pacman asks a person to confirm a transaction and treats an
   unanswerable prompt as a refusal — measured: it exits 1 with the answer unread. The group install
   that follows the block is `pacman -S --noconfirm kgsm-node`, and pacman's own default for a group
   selection is every member, so that installs all of `kgsm-node`.
+
+Two seams between the README and the script are checked before the container boots: the script must
+still name the release URL, and the README must quote the fingerprint the script pins.
 
 ## What it needs
 
