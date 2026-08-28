@@ -235,10 +235,11 @@ nothing. Running it twice is safe.
 
 ## 8. Register a library, if the default one is in the wrong place
 
-**The engine's first run seeds a library.** It registers `default` at `/var/lib/kgsm/instances` —
-which is where `kgsm --paths` already says instances live — names it in the config it just created,
-and writes the `.kgsm-library` marker that makes it reachable. A node can host a game with nobody
-having configured anything.
+**The engine's first run seeds a library.** On its way to running whatever it was asked to do, it
+creates its config, registers `default` at `/var/lib/kgsm/instances` — which is where `kgsm --paths`
+already says instances live — names it as the default, and writes the `.kgsm-library` marker that
+makes it reachable. A node can host a game with nobody having configured anything, and the first
+command is an ordinary one: `kgsm install factorio` on an untouched host installs factorio.
 
 That default is on the root filesystem. Game data is tens of gigabytes, so on most hosts the answer
 to question 3 is a different disk, and the step here is to say so:
@@ -257,16 +258,6 @@ Drop the seeded one if nothing has been installed into it, or move what has:
 ```bash
 sudo -u kgsm -H kgsm libraries remove default              # empty
 sudo -u kgsm -H kgsm libraries remove default --drain main # with instances in it
-```
-
-**The engine's very first invocation does nothing but create its config, and exits 0.** It prints
-`config.ini not found, created new file` and stops — so a first command that was meant to *do*
-something reports success and does not run. Warm it up before the first real command, or read the
-output rather than the exit code:
-
-```bash
-sudo -u kgsm -H kgsm --version               # creates the config, seeds the library, exits 0
-sudo -u kgsm -H kgsm libraries list          # from here on, commands do what they say
 ```
 
 **`-u kgsm -H` is the whole point.** See §14: run without it and the registry lands under the wrong
