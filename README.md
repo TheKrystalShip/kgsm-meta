@@ -49,6 +49,12 @@ produce a node that starts and is wrong, which is worse than one that has not st
 
 Upgrades from here are `pacman -Syu`, key rotation included.
 
+`NODE-PROVISIONING.md` is the same thing as a runbook: the questions to put to the operator before
+starting, non-interactive forms of every command here, and the steps that come after the packages
+are installed — the library a host has to register before an instance can exist, the administrator's
+one-time password, the model backend the assistant needs. It is written to be handed to an agent
+with a shell on the target host.
+
 ### What `setup-node.sh` does, and doing it by hand instead
 
 It initialises pacman's keyring, fetches the packaging key, refuses it unless it carries the
