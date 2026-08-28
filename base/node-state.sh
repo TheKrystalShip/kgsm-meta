@@ -49,7 +49,7 @@ kgsm_have_systemd() {
 
 # Read newline-separated output into a named array, dropping blanks.
 #
-# ⚠ Never `mapfile < <(...)` or `while read; done < <(...)` here. Process substitution needs
+# Never `mapfile < <(...)` or `while read; done < <(...)` here. Process substitution needs
 # /dev/fd, which is a symlink to /proc/self/fd — and a pacman hook runs chrooted with no /proc
 # mounted, so every such read silently yields nothing. Measured: the whole scan came back empty and
 # the report announced that no KGSM packages were installed, on a node that had just installed ten.

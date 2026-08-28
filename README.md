@@ -173,7 +173,7 @@ check, installs `kgsm-base` first, and leaves `kgsm` owning neither.
 
 **`kgsm-base` must be installed before the packages whose scriptlets preset their units.** pacman
 sorts a transaction by dependency order and every unit-shipping package depends on it, so it is —
-verified, it installs first out of fifteen. ⚠ `pacman -U -dd` skips that sort and installs in
+verified, it installs first out of fifteen. `pacman -U -dd` skips that sort and installs in
 command-line order; a scriptlet running before `50-kgsm.preset` exists falls through to `disable *`
 and its unit lands off. That affects hand-built testing only, never a `pacman -S` from the
 repository.
