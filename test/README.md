@@ -55,7 +55,7 @@ It touches nothing outside the container: `--cgroupns=private` gives the contain
 root, so a privileged init in there cannot see or act on this host's `kgsm.slice` or the game
 servers under it, and the repository is bind-mounted read-only.
 
-## Three things that are measured rather than asserted
+## What is measured rather than asserted
 
 - **Where `kgsm-keyring` came from.** No command in the test names it: it arrives because
   `kgsm-base` depends on it, and a repository serving an older `kgsm-base` delivers no keyring at
@@ -65,6 +65,10 @@ servers under it, and the repository is bind-mounted read-only.
   unit, which is not the same as after the slice exists — so it fails, and the second pass through
   the node-state logic attaches it. The test reports the state it reaches instead of asserting one,
   because a host without bpffs or without the kernel facilities would legitimately reach another.
+- **Which invocation seeded the engine's library.** A node's library is registered by the engine's
+  first run, and whether that run was a unit's or the test's own `libraries list` depends on what the
+  installed set happens to shell out to kgsm for. Both are a working node, so the run says which one
+  it saw and asserts the library itself either way.
 - **The container's own failed units.** `systemd-firstboot.service` and `getty@tty1.service` fail in
   any container, and `systemd-networkd-wait-online.service` times out because networkd manages
   nothing here — it is pulled in by `network-online.target`, which the assistant and bot units want.

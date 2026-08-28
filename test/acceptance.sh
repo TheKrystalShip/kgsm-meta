@@ -314,6 +314,43 @@ refused="$(docker exec "$CONTAINER" curl -s --unix-socket /run/kgsm-reactor/stat
     http://localhost/status 2>/dev/null | grep -o '"problems":\[[^]]*\]')"
 expect "$refused" '"problems":[]' "the reactor honoured every rule it installed"
 
+# A node that cannot place a game server cannot host one, and no package registers a library: the
+# engine's first run does. Under systemd the engine runs as the service account, so HOME is set here
+# to what systemd gives User=kgsm — asked with any other, the engine answers about a different tree
+# and the check would measure nothing.
+AS_KGSM=(runuser -u kgsm -- env HOME=/var/lib/kgsm)
+KGSM_HOME_DATA=/var/lib/kgsm/.local/share/kgsm
+
+# Whether a unit got there first. Read before this test runs a kgsm command of its own, because that
+# command would seed it too — either answer is a working node, and which one it was is worth saying.
+if docker exec "$CONTAINER" test -e "${KGSM_HOME_DATA}/libraries.ini" 2>/dev/null; then
+    info "the engine had already been run by a unit — its library was in place before this check"
+else
+    info "no unit had run the engine yet — this check is its first invocation"
+fi
+
+libs="$(docker exec "$CONTAINER" "${AS_KGSM[@]}" kgsm libraries list 2>&1)"
+if printf '%s\n' "$libs" | awk 'NR > 1 && $2 == "online" { found = 1 } END { exit !found }'; then
+    ok "the engine has a reachable library — a game server can be placed on this node"
+else
+    bad "the engine has no reachable library: $(printf '%s' "$libs" | tr '\n' ' ')"
+fi
+
+# Registered is not the same as reachable. __logic_library_is_online reads a marker off the root and
+# compares its id to the registry's, so that an unmounted disk is not mistaken for the library it
+# normally holds — and a root without one is registered, permanently offline, and refuses every
+# install as unreachable.
+if docker exec "$CONTAINER" test -f "${KGSM_HOME_DATA}/instances/.kgsm-library" 2>/dev/null; then
+    ok "the library root carries its marker"
+else
+    bad "the library root has no .kgsm-library marker — it would read offline forever"
+fi
+
+# The config key holds a NAME resolved against the registry, so the two are only correct together:
+# unnamed, the second library anybody adds makes every install demand --library.
+expect "$(docker exec "$CONTAINER" "${AS_KGSM[@]}" kgsm config get default_library 2>/dev/null)" \
+       default "the seeded library is named as this host's default"
+
 # The handoff, end to end: the password in that file signs the account in that file in.
 user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
 pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"

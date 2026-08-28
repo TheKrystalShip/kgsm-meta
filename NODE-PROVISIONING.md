@@ -236,10 +236,22 @@ nothing. Running it twice is safe.
 ## 8. Register a library, if the default one is in the wrong place
 
 **The engine's first run seeds a library.** On its way to running whatever it was asked to do, it
-creates its config, registers `default` at `/var/lib/kgsm/instances` — which is where `kgsm --paths`
-already says instances live — names it as the default, and writes the `.kgsm-library` marker that
-makes it reachable. A node can host a game with nobody having configured anything, and the first
-command is an ordinary one: `kgsm install factorio` on an untouched host installs factorio.
+creates its config, registers `default` at the instances directory `kgsm --paths` already reports,
+names it as the default, and writes the `.kgsm-library` marker that makes it reachable. A node can
+host a game with nobody having configured anything, and the first command is an ordinary one:
+`kgsm install factorio` on an untouched host installs factorio.
+
+Those paths follow the service account's home, because that is what systemd gives `User=kgsm` and no
+unit sets `XDG_*`. On a node they are:
+
+```
+/var/lib/kgsm/.config/kgsm/config.ini              the config
+/var/lib/kgsm/.local/share/kgsm/libraries.ini      the library registry
+/var/lib/kgsm/.local/share/kgsm/instances          the seeded library root
+```
+
+Ask the engine rather than assuming: `sudo -u kgsm -H kgsm --paths` prints all of them, and reading
+them as any other account reports a different tree entirely (§14).
 
 That default is on the root filesystem. Game data is tens of gigabytes, so on most hosts the answer
 to question 3 is a different disk, and the step here is to say so:
