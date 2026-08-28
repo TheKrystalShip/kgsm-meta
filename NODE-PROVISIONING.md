@@ -39,7 +39,7 @@ names exactly what is lost by skipping it, so a person can answer "skip" and get
 |---|---|---|---|
 | 1 | **Root access** — a root shell, or the `sudo` password | Installing packages, writing `/etc/pacman.conf` and trusting a key are all privileged | Nothing can proceed; stop here |
 | 2 | **Which components this node runs** (see the roles in §4) | A node is a selection, not a fixed set. A machine with no GPU should not be asked to serve models; a second node usually wants no Discord bot | Default to the whole `kgsm-node` group, and say that is what was chosen |
-| 3 | **Where game server instances live** — an absolute path on this host | Which disk holds tens of GB of game data is a hardware decision (§8) | No instance can be installed until somebody registers one |
+| 3 | **Where game server instances live** — an absolute path on this host | Which disk holds tens of GB of game data is a hardware decision (§8) | Instances land on the root filesystem, in the library the engine seeds itself |
 | 4 | **The public address this panel is reached at**, and whether it needs TLS | A certificate path and a callback URL describe one host and are wrong on any other | The panel answers on `http://<lan-ip>:8080` and nothing off the LAN reaches it (§10) |
 | 5 | **A Discord bot token** — only if `kgsm-bot` was selected | It comes from a Discord application only they own | `kgsm-bot.service` stays stopped and `kgsm-node-status` keeps saying so |
 | 6 | **A Discord OAuth client id + secret** — only if people sign in through Discord | Same application, and both callbacks must be registered on it | Everyone signs in with a KGSM username and password, which needs nothing |
@@ -233,26 +233,45 @@ It starts a unit only when it is enabled, stopped and owes nothing; it restarts 
 was just replaced; it never fails, and on a host with no systemd it prints the report and does
 nothing. Running it twice is safe.
 
-## 8. Register a library
+## 8. Register a library, if the default one is in the wrong place
 
-**A fresh node has no library registered, and no game server can be installed until one is.** A
-library is a named root that instances are placed in — which is a hardware decision (which disk, how
-much room), so nothing invents one. This is question 3.
+**The engine's first run seeds a library.** It registers `default` at `/var/lib/kgsm/instances` —
+which is where `kgsm --paths` already says instances live — names it in the config it just created,
+and writes the `.kgsm-library` marker that makes it reachable. A node can host a game with nobody
+having configured anything.
+
+That default is on the root filesystem. Game data is tens of gigabytes, so on most hosts the answer
+to question 3 is a different disk, and the step here is to say so:
 
 ```bash
 sudo -u kgsm -H kgsm libraries add /srv/games --name main
-sudo -u kgsm -H kgsm libraries list
+sudo -u kgsm -H kgsm config set default_library=main
+sudo -u kgsm -H kgsm libraries list          # both, with free space and online state
 ```
 
-With exactly one library registered, it is the default and nothing more is needed. Register several —
-one per disk — and name which one new instances land in:
+Naming the new default is not optional once there are two. With several registered and no default
+chosen, every install refuses and demands `--library`.
+
+Drop the seeded one if nothing has been installed into it, or move what has:
 
 ```bash
-sudo -u kgsm -H kgsm config set default_library=main
+sudo -u kgsm -H kgsm libraries remove default              # empty
+sudo -u kgsm -H kgsm libraries remove default --drain main # with instances in it
+```
+
+**The engine's very first invocation does nothing but create its config, and exits 0.** It prints
+`config.ini not found, created new file` and stops — so a first command that was meant to *do*
+something reports success and does not run. Warm it up before the first real command, or read the
+output rather than the exit code:
+
+```bash
+sudo -u kgsm -H kgsm --version               # creates the config, seeds the library, exits 0
+sudo -u kgsm -H kgsm libraries list          # from here on, commands do what they say
 ```
 
 **`-u kgsm -H` is the whole point.** See §14: run without it and the registry lands under the wrong
-account's home, where no unit on this host will ever look.
+account's home, where no unit on this host will ever look — including the seeded library, which the
+first run creates wherever `HOME` pointed.
 
 An admin can do the same thing from the panel once somebody has signed in (`POST
 /api/v1/hosts/{id}/libraries`, admin-gated) — but during provisioning nobody has, so the shell is the
