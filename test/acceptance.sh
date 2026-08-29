@@ -354,14 +354,46 @@ expect "$(docker exec "$CONTAINER" "${AS_KGSM[@]}" kgsm config get default_libra
 # The handoff, end to end: the password in that file signs the account in that file in.
 user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
 pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
+token=""
 if [[ -n "$user" && -n "$pass" ]]; then
-    code="$(docker exec "$CONTAINER" curl -s -o /dev/null -w '%{http_code}' \
+    login="$(docker exec "$CONTAINER" curl -s -w '\n%{http_code}' \
         -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' \
         -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" 2>/dev/null)"
+    code="$(printf '%s' "$login" | tail -n1)"
     expect "$code" 200 "'${user}' signs in with the password from the file"
+    # Kept for the capability assertions below, which are the admin's view of the node.
+    token="$(printf '%s' "$login" | head -n-1 | grep -oE '"token" *: *"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
 else
     bad "could not read a username and password out of the initial-admin-password file"
 fi
+
+# Every leaf this node installed, joined up. Each of these binds a fixed endpoint, and the panel is
+# where a person finds out whether the machine's parts found each other — so a node that installed
+# the whole ecosystem and reports half of it absent is a broken node, however green systemctl looks.
+# This is the assertion the wiring defects hid behind: every unit was active and every capability
+# said the leaf was not there.
+caps="$(docker exec "$CONTAINER" curl -s -H "Authorization: Bearer ${token}" \
+    http://127.0.0.1:8080/api/v1/hosts 2>/dev/null)"
+if [[ -z "$token" ]]; then
+    bad "no session token — the capability block could not be read"
+elif [[ "$caps" != *'"capabilities"'* ]]; then
+    bad "GET /hosts returned no capability block — the panel cannot say what this node runs"
+else
+    # The five the block reports. The firewall and the bot are not in it — the ports surface and the
+    # bot page carry their own provisioning — so asserting them here would be asserting a shape the
+    # API does not have.
+    for leaf in metrics watchdog scheduler reactor assistant; do
+        if printf '%s' "$caps" | grep -qE "\"${leaf}\"[^}]*\"provisioned\" *: *true"; then
+            ok "the api found the ${leaf} leaf without being told where it is"
+        else
+            bad "the api reports ${leaf} absent, though this node installed it"
+        fi
+    done
+fi
+
+# The secret three surfaces need and no person can supply. One file, minted by whichever of them
+# looked first, owner-only — the alternative is a node whose panel chat is silently dead.
+check_mode /var/lib/kgsm/auth/relay-secret 600 "the host's self-minted relay secret"
 
 # ------------------------------------------------------------------- measured, and not asserted
 #
