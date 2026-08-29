@@ -20,10 +20,15 @@
 #
 #   * the [kgsm] database and every package verify against the packaging key, at
 #     SigLevel = Required DatabaseRequired — the same enforcement a real node runs under
-#   * `pacman -S` of the whole kgsm-node group leaves the ready units ACTIVE with nothing else run
+#   * installing the kgsm-node group leaves the ready units ACTIVE with nothing else run
 #   * exactly one unit is blocked, on exactly one key: kgsm-bot on Discord__Token
-#   * kgsm-api minted its own signing key and its first administrator, both 0600
+#   * kgsm-api minted its own signing key and its first administrator, both 0600, and the host minted
+#     the secret its surfaces prove themselves to each other with
 #   * that administrator can sign in with the password in the file
+#   * the API found every leaf this node installed WITHOUT being told where any of them is, and
+#     reports the one it did not install as absent rather than as unreachable
+#
+# A few members are deliberately not installed — see SKIP_MEMBERS, which says why for each.
 #
 # Requirements: docker usable WITHOUT sudo, and this checkout sitting in the tks workspace so
 # scripts/publish-repo.sh can build the package set. The packaging key's secret half is needed —
@@ -219,19 +224,53 @@ log "running the README's install block"
 docker exec "$CONTAINER" bash /tmp/kgsm-install.sh >"$INSTALLLOG" 2>&1
 install_rc=$?
 
+# Members this suite does not install. None of them is skipped for being broken, and the exclusion is
+# named out loud below rather than quietly narrowing what "the kgsm-node group" means:
+#
+#   kgsm-speech  pulls 813MB of models as a hard dependency, to serve recognition and synthesis a node
+#                without a GPU cannot usefully run. Paying that download on every run buys nothing.
+#   kgsm-llm     the assistant, and kgsm-web the Control Panel SPA. Both are exercised on the host that
+#                has the hardware for them; here they would only re-prove what the leaf below proves
+#                better — that a leaf which is NOT installed is reported absent.
+#
+# Their absence is itself under test: the API must report each as absent rather than as a leaf that is
+# present and unreachable, which is the other half of the discovery this suite exists to check.
+SKIP_MEMBERS=(kgsm-speech kgsm-llm kgsm-web)
+
 if (( install_rc == 0 )); then
-    # The README's second command, with the prompt answered the only way a script can: pacman's own
-    # default for a group selection is every member, so --noconfirm installs all of kgsm-node.
-    log "installing the kgsm-node group"
-    docker exec "$CONTAINER" pacman -S --noconfirm kgsm-node >>"$INSTALLLOG" 2>&1
+    # The README's second command is `pacman -S kgsm-node`, whose prompt defaults to every member. A
+    # script answers it by naming the members instead — read from the group rather than from a list
+    # kept here, so a member added to the ecosystem is installed without this file being touched.
+    skip_re="$(printf '%s|' "${SKIP_MEMBERS[@]}")"; skip_re="${skip_re%|}"
+    members="$(docker exec "$CONTAINER" pacman -Sqg kgsm-node 2>/dev/null \
+        | grep -vE "^(${skip_re})$" | tr '\n' ' ')"
+    log "installing the kgsm-node group, less ${SKIP_MEMBERS[*]}"
+    note "installing: ${members}"
+    # Unquoted on purpose: the member list is words, and a package name cannot contain a space.
+    # shellcheck disable=SC2086
+    docker exec "$CONTAINER" pacman -S --noconfirm $members >>"$INSTALLLOG" 2>&1
     install_rc=$?
 fi
 
-# A .NET service takes a moment to bind; asserting the instant the transaction returns would measure
-# start-up latency rather than whether the node works.
+# What "settled" means, in three parts, because the obvious one is wrong. `is-active` on a Type=simple
+# unit is true the instant the process is exec'd — before the API has opened its stores, minted its
+# signing key or created the first administrator. Waiting on that waits on fork(), and the assertions
+# below then race the very bootstrap they check; which of the two won depended on how many other units
+# the transaction happened to start first, so the suite passed or failed on package count.
+#
+# So: systemd has no queued jobs left (the post-transaction hook starts units one at a time, and a unit
+# ordered after network-online.target waits on systemd-networkd-wait-online, which in a container Docker
+# configures the interface for takes a couple of minutes to give up), the API answers its own health
+# endpoint, and the one-time files its bootstrap writes are on disk. The last is needed because the
+# bootstrapper is a hosted service: Kestrel can be listening while it is still running.
+#
+# Every part is bounded and none of them replaces an assertion — a file that never arrives still fails
+# its check below, with the message it always had.
 log "letting the units settle"
-for _ in $(seq 1 45); do
-    docker exec "$CONTAINER" systemctl is-active kgsm-api.service >/dev/null 2>&1 && break
+for _ in $(seq 1 90); do
+    docker exec "$CONTAINER" systemctl list-jobs --no-pager 2>/dev/null | grep -q 'No jobs' || { sleep 2; continue; }
+    docker exec "$CONTAINER" curl -fsS -o /dev/null http://127.0.0.1:8080/health 2>/dev/null || { sleep 2; continue; }
+    docker exec "$CONTAINER" test -e /var/lib/kgsm-api/initial-admin-password 2>/dev/null && break
     sleep 2
 done
 
@@ -258,9 +297,7 @@ READY=(
     kgsm-reactor.service
     kgsm-journal-prune.timer
     kgsm-api.service
-    kgsm-assistant-service.service
     kgsm-firewall.socket
-    kgsm-speech.socket
 )
 for u in "${READY[@]}"; do
     expect "$(docker exec "$CONTAINER" systemctl is-active "$u" 2>/dev/null)" active "${u} is active"
@@ -272,10 +309,6 @@ expect "$(docker exec "$CONTAINER" systemctl is-active  kgsm-bot.service 2>/dev/
        "kgsm-bot.service is stopped — blocked on its token"
 expect "$(docker exec "$CONTAINER" systemctl is-enabled kgsm-bot.service 2>/dev/null)" enabled \
        "kgsm-bot.service is enabled — it comes up once the token is set"
-
-# Opt-in stays off. A preset decision, not a default.
-expect "$(docker exec "$CONTAINER" systemctl is-active kgsm-rag-indexer.service 2>/dev/null)" inactive \
-       "kgsm-rag-indexer.service is not running — opt-in, and the group does not carry it"
 
 # The report a person reads. It must name exactly one outstanding key, and it must be the one no
 # host can invent.
@@ -295,7 +328,6 @@ check_mode() {
 }
 check_mode /var/lib/kgsm-api/initial-admin-password 600 "the first administrator's password"
 check_mode /var/lib/kgsm-api/signing-key            600 "kgsm-api's self-minted signing key"
-check_mode /var/lib/kgsm-assistant/signing-key      600 "the assistant's self-minted signing key"
 
 # The reactor's rules, which exist nowhere in its code: the package ships them beside the binary and
 # the leaf installs them into its own state directory the first time it starts. A node that came up
@@ -379,16 +411,26 @@ if [[ -z "$token" ]]; then
 elif [[ "$caps" != *'"capabilities"'* ]]; then
     bad "GET /hosts returned no capability block — the panel cannot say what this node runs"
 else
-    # The five the block reports. The firewall and the bot are not in it — the ports surface and the
-    # bot page carry their own provisioning — so asserting them here would be asserting a shape the
-    # API does not have.
-    for leaf in metrics watchdog scheduler reactor assistant; do
+    # The block reports five. The firewall and the bot are not in it — the ports surface and the bot
+    # page carry their own provisioning — so asserting them here would be asserting a shape the API
+    # does not have.
+    for leaf in metrics watchdog scheduler reactor; do
         if printf '%s' "$caps" | grep -qE "\"${leaf}\"[^}]*\"provisioned\" *: *true"; then
             ok "the api found the ${leaf} leaf without being told where it is"
         else
             bad "the api reports ${leaf} absent, though this node installed it"
         fi
     done
+
+    # And the other direction, which is the half that is easy to get wrong. The assistant is not
+    # installed here, so the API must report it ABSENT — not present-and-unreachable. A host resolves
+    # a leaf's endpoint from the descriptor its package leaves behind; no package, no descriptor, no
+    # capability. Reporting it down instead would make every node without an assistant look broken.
+    if printf '%s' "$caps" | grep -qE '"assistant"[^}]*"provisioned" *: *false'; then
+        ok "the api reports the assistant absent — it is not installed on this node"
+    else
+        bad "the api does not report the assistant absent, though this node never installed it"
+    fi
 fi
 
 # The secret three surfaces need and no person can supply. One file, minted by whichever of them
