@@ -443,6 +443,12 @@ check_mode /var/lib/kgsm/leaves/commands 755 "the leaf command manifests"
 check_mode /var/lib/kgsm/auth            700 "the KGSM account store"
 check_mode /var/lib/kgsm/cluster         755 "what members of a cluster on one machine share"
 
+# The two shared env files. Both ship blank — no package carries a credential — and both are read by
+# every member on the host, so a missing one is a host where sign-in or cluster membership is
+# configured per component instead of once.
+check_mode /etc/kgsm/kgsm-auth.env    640 "the host's shared sign-in applications"
+check_mode /etc/kgsm/kgsm-cluster.env 640 "the host's shared cluster secret"
+
 # The secret three surfaces need and no person can supply. One file, minted by whichever of them
 # looked first, owner-only — the alternative is a node whose panel chat is silently dead.
 check_mode /var/lib/kgsm/auth/relay-secret 600 "the host's self-minted relay secret"

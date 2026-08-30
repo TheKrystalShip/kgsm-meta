@@ -14,7 +14,7 @@
 pkgname=kgsm-base
 # A placeholder: pkgver() below replaces it with what deploy/version.sh reports, so the number is
 # declared in exactly one place and this file never carries a copy that can fall behind.
-pkgver=1.5.0
+pkgver=1.6.0
 pkgrel=1
 pkgdesc="KGSM shared base — the service account, state tree, unit policy and node readiness tools"
 arch=('any')
@@ -34,9 +34,10 @@ options=('!debug')
 # before all of this — `pacman-key --add` + `--lsign-key`, which the README carries.
 depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils' 'kgsm-keyring')
 
-# The shared sign-in file is the one thing here a person edits. backup=() is pacman's version of
+# The two shared env files are what a person edits here. backup=() is pacman's version of
 # create-if-absent-never-clobber: an upgrade writes .pacnew beside an edited file, never over it.
-backup=('etc/kgsm/kgsm-auth.env')
+backup=('etc/kgsm/kgsm-auth.env'
+        'etc/kgsm/kgsm-cluster.env')
 
 pkgver() {
     "${startdir}/../deploy/version.sh" --pkgver
@@ -62,6 +63,12 @@ package() {
     # EnvironmentFile=- and a host that signs nobody in must still find it there to fill in.
     install -Dm640 "${base}/kgsm-auth.env" \
         "${pkgdir}/etc/kgsm/kgsm-auth.env"
+
+    # The cluster secret every member on the host holds, blank for the same reason. One file rather
+    # than one copy per member: a machine can run a node and an anchor, and they must agree on it or
+    # each concludes separately that it is not clustered.
+    install -Dm640 "${base}/kgsm-cluster.env" \
+        "${pkgdir}/etc/kgsm/kgsm-cluster.env"
 
     # Which units a node runs. Arch's 99-default.preset is `disable *`, so without this every kgsm
     # unit would land disabled and a node would need a person to enable each one by hand.

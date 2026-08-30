@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0]
+
+### Added — `/etc/kgsm/kgsm-cluster.env`
+
+The cluster secret every member on a host holds, shipped blank like the shared sign-in file beside it
+and for the same reason: no package carries a credential. A host can run more than one member of a
+cluster — a node that runs the engine and game servers, and an anchor that provides one capability to
+the whole cluster — and they must agree on the secret, so it is set once per host rather than once per
+member. Each member's unit loads it before its own env file.
+
+Listed in `backup=`, so an upgrade leaves an edited file alone and writes `.pacnew` beside it.
+
 ## [1.5.0]
 
 ### Added — `/var/lib/kgsm/cluster/`
