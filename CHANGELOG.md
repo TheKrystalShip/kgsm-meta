@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.0]
+
+### Added — the auth anchor's preset entry
+
+`kgsm-auth-anchor.service` is **disabled** by the fleet's preset policy. A cluster holds its accounts
+in one place and which machine holds them is an administrator's choice, so the package installing it
+claims nothing: a second machine carrying it, stopped, is a promotion candidate rather than a second
+authority. It joins the opt-in group beside the RAG indexer and the llama.cpp backend.
+
 ## [1.6.0]
 
 ### Added — `/etc/kgsm/kgsm-cluster.env`
