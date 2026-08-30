@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.5.0]
+
+### Added — `/var/lib/kgsm/cluster/`
+
+The shared state tree gains `cluster/`, for what several members of a cluster on one machine share.
+Declared here rather than by whichever member is installed first, like every other path in that tree.
+
+A member's own roster, outbox and inbox are deliberately not in it. Each member keeps those under its
+own unit's `StateDirectory=`, which systemd creates owned by that unit's user — so two members on one
+machine share nothing that would make one's membership depend on the other's process.
+
 ## [1.4.0]
 
 ### Added — `setup-node.sh`, one line that configures pacman

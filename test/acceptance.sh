@@ -433,6 +433,16 @@ else
     fi
 fi
 
+# The shared state tree kgsm-base declares. Every path here is written by several packages and owned
+# by none of them, so a missing one is not a missing feature — it is one package quietly writing
+# somewhere else, or not at all. Checked as modes rather than mere existence because the account store
+# holding password hashes at anything but 0700 is the failure worth catching.
+check_mode /var/lib/kgsm/events          755 "the engine's event journal"
+check_mode /var/lib/kgsm/leaves          755 "the leaf config descriptors"
+check_mode /var/lib/kgsm/leaves/commands 755 "the leaf command manifests"
+check_mode /var/lib/kgsm/auth            700 "the KGSM account store"
+check_mode /var/lib/kgsm/cluster         755 "what members of a cluster on one machine share"
+
 # The secret three surfaces need and no person can supply. One file, minted by whichever of them
 # looked first, owner-only — the alternative is a node whose panel chat is silently dead.
 check_mode /var/lib/kgsm/auth/relay-secret 600 "the host's self-minted relay secret"
