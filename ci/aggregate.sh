@@ -70,6 +70,7 @@ done
 REPOS=(
     'kgsm:v'
     'kgsm-api:v'
+    'kgsm-auth:v'
     'kgsm-bot:v'
     'kgsm-firewall:v'
     'kgsm-llm:v'
