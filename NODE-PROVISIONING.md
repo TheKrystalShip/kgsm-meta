@@ -432,9 +432,11 @@ Read `systemctl --failed` against this list before reporting anything:
 account's home at `/var/lib/kgsm`.** Instances, blueprints, the library registry and the config are
 all under its XDG paths.
 
-Run `kgsm` as yourself and it reads and writes *your* home instead — quietly, successfully, and
-invisibly to every unit on the host. An instance created that way does not exist as far as the
-watchdog, the monitor and the API are concerned.
+Run as any other account, the engine would read and write *that* account's home, a registry no unit
+on the host reads — so it refuses instead. Every command other than `--help`, `--version` and
+`--paths` stops with exit code 16, naming the account the host's services run as (the owner of the
+event journal at `/var/lib/kgsm/events`) and the exact invocation to use. `--paths` still answers,
+and is how to see which tree an account resolves to.
 
 ```bash
 sudo -u kgsm -H kgsm <command>          # -H sets HOME to /var/lib/kgsm; without it, sudo keeps yours
