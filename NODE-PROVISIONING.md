@@ -335,9 +335,18 @@ public URL.
 
 Machine prerequisites:
 
-- `nginx` installed and enabled. The package ships `/etc/nginx/conf.d/00-kgsm-api-sites.conf`, the
-  proxy rules, the reload grant and the `/var/lib/kgsm/{tls,nginx}` directories; nothing is hand-copied.
-- The router forwards TCP 443 to this machine. Port 80 is not needed: certificates are DNS-01. No certbot.
+- `nginx` installed and enabled (`systemctl enable --now nginx`). The package ships
+  `/etc/nginx/conf.d/00-kgsm-api-sites.conf`, the proxy rules, the reload grant and the
+  `/var/lib/kgsm/{tls,nginx}` directories; nothing is hand-copied. Arch's stock `nginx.conf` reads
+  no `conf.d`, so its `http {}` block needs `include /etc/nginx/conf.d/*.conf;` — without it the
+  site file is never loaded and `nginx -t` passes anyway.
+- The router forwards TCP 443 to this machine, as a plain port forward. A proxy that terminates TLS
+  in front of it serves only the names it holds certificates for and refuses the cluster's name with
+  `unrecognized name`; one in front must pass the connection through by SNI. Port 80 is not needed:
+  certificates are DNS-01. No certbot.
+- The host firewall admits TCP 443 from anywhere and the join port from the private network the DNS
+  holder reaches it over, e.g. `ufw allow 443/tcp` and
+  `ufw allow in on wg0 from 10.44.0.0/24 to any port 8097 proto tcp`.
 - The dynamic-DNS client for `Api__PublicHost` runs on this network.
 
 Join:
@@ -448,9 +457,9 @@ Then the one end-to-end check, and only with the person's agreement — it downl
 writes to their disk:
 
 ```bash
-sudo -u kgsm -H kgsm install factorio --name probe
+sudo -u kgsm -H kgsm install factorio --id probe
 sudo -u kgsm -H kgsm start probe && sleep 20 && sudo -u kgsm -H kgsm status probe
-sudo -u kgsm -H kgsm stop probe && sudo -u kgsm -H kgsm uninstall probe
+sudo -u kgsm -H kgsm stop probe && sudo -u kgsm -H kgsm uninstall probe --yes
 ```
 
 Factorio and Terraria are the quickest to install; prefer one of them when the game does not matter.
