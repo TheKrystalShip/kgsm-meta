@@ -10,7 +10,8 @@ is, what the hook does. This describes the *run*. Where the two disagree about a
 is right: its install block is extracted and executed by `test/acceptance.sh`, so it cannot drift.
 
 **Where this ends.** A node that boots into its units, an administrator account somebody can sign in
-to, and a library a game server can be installed into. Installing game servers is not provisioning
+to, a library a game server can be installed into, and — for a cluster node — its assigned name
+served over HTTPS. Installing game servers is not provisioning
 and is not here.
 
 ## The rules this run is bound by
@@ -40,9 +41,9 @@ names exactly what is lost by skipping it, so a person can answer "skip" and get
 | 1 | **Root access** — a root shell, or the `sudo` password | Installing packages, writing `/etc/pacman.conf` and trusting a key are all privileged | Nothing can proceed; stop here |
 | 2 | **Which components this node runs** (see the roles in §4) | A node is a selection, not a fixed set. A machine with no GPU should not be asked to serve models; a second node usually wants no Discord bot | Default to the whole `kgsm-node` group, and say that is what was chosen |
 | 3 | **Where game server instances live** — an absolute path on this host | Which disk holds tens of GB of game data is a hardware decision (§8) | Instances land on the root filesystem, in the library the engine seeds itself |
-| 4 | **The public address this panel is reached at**, and whether it needs TLS | A certificate path and a callback URL describe one host and are wrong on any other | The panel answers on `http://<lan-ip>:8080` and nothing off the LAN reaches it (§10) |
+| 4 | **Standalone, or joining a cluster.** Standalone: the public address the panel is reached at, and whether it needs TLS. Cluster: the cluster secret, this machine's public host (its dynamic-DNS name, with 443 forwarded to it), and an address the cluster's DNS holder reaches it at before it has a name (§10) | Each describes one network and is wrong on any other | Standalone on `http://<lan-ip>:8080`; nothing off the LAN reaches it |
 | 5 | **A Discord bot token** — only if `kgsm-bot` was selected | It comes from a Discord application only they own | `kgsm-bot.service` stays stopped and `kgsm-node-status` keeps saying so |
-| 6 | **A Discord OAuth client id + secret** — only if people sign in through Discord | Same application, and both callbacks must be registered on it | Everyone signs in with a KGSM username and password, which needs nothing |
+| 6 | **A Discord OAuth client id + secret** — standalone only, if people sign in through Discord. A cluster node signs nobody in: the auth anchor does | Same application, and both callbacks must be registered on it | Everyone signs in with a KGSM username and password, which needs nothing |
 | 7 | **The inference backend** — Ollama, or the llama.cpp units; only if `kgsm-llm` was selected | A host runs one or the other; both loaded means two copies of the weights | The assistant starts and every turn fails until one exists (§11) |
 | 8 | **A Steam account username** — only for games Steam will not serve anonymously | It is their account, and the login is interactive once | Anonymous-install games work; account-gated ones refuse |
 
@@ -307,15 +308,67 @@ it would sit in shell history.
 Who may do what is not a sign-in question. It is set on the KGSM account in the Control Panel, and no
 Discord guild, group or role grants anything on any surface.
 
-## 10. Make the panel reachable
+## 10. Make the node reachable
+
+Everything here is in `/etc/kgsm-api/kgsm-api.env`, where **every host-specific value ships commented
+out on purpose**. Follow §10·a or §10·b, never both. Ports on the host firewall are the operator's;
+KGSM opens and closes *game* ports and never 443 or 8080.
+
+```bash
+sudo systemctl restart kgsm-api.service       # after any edit to that file
+```
+
+### 10·a. Joining a cluster
+
+The cluster names the node, issues its certificate and serves it through nginx. Authority:
+`cluster-dns-plan.md` in the workspace. The node is configured with no name, no certificate and no
+public URL.
+
+| Where | Key | Value |
+|---|---|---|
+| `/etc/kgsm/kgsm-cluster.env` | `Cluster__Secret` | The cluster's secret, supplied by the operator |
+| `/etc/kgsm-api/kgsm-api.env` | `Api__Urls` | `http://127.0.0.1:8097`, plus the join address from the last row when it is on this machine's own interface |
+| | `Api__HostId` | The member id, stable forever. Blank takes the machine name |
+| | `Api__PublicHost` | The machine's dynamic-DNS name, or a fixed public address. Blank: the node is a member but gets no name |
+| | `Api__CorsOrigins` | The panel's origin, `https://kgsm.<zone>` |
+| never set | `Api__PublicBaseUrl`, `Api__ConnectHost`, `Api__ClusterGossipUrl`, `Kestrel__*`, `Api__DiscordRedirectUri`, provider keys | Their values come from the cluster |
+
+Machine prerequisites:
+
+- `nginx` installed and enabled. The package ships `/etc/nginx/conf.d/00-kgsm-api-sites.conf`, the
+  proxy rules, the reload grant and the `/var/lib/kgsm/{tls,nginx}` directories; nothing is hand-copied.
+- The router forwards TCP 443 to this machine. Port 80 is not needed: certificates are DNS-01. No certbot.
+- The dynamic-DNS client for `Api__PublicHost` runs on this network.
+
+Join:
+
+1. **Pick the join address**: an address the DNS holder's machine reaches this node's API at before it
+   has a name. The anchor delivers the first certificate there, and a public address needs TLS the
+   node does not have yet, so it is a private one over plain http: a LAN or VPN address (e.g. a
+   WireGuard peer address) bound in `Api__Urls` as `http://<private-ip>:8097`.
+2. **Optionally pin the name** on the DNS anchor: `MemberNamePins` in `kgsm-dns.settings.json`
+   (`<member-id>=<name>`), then redeploy kgsm-dns. Unpinned, a name is drawn from `MemberNames`.
+3. **An admin adds the member** from the panel's Cluster page, pasting `http://<private-ip>:8097`.
+4. **Watch it named**, within a minute:
+
+```bash
+journalctl -u kgsm-api -f | grep -i -E 'name|certificate|site'   # told its name, certificate installed
+dig +short <name>.nodes.<zone> @<zone's nameserver>              # the CNAME to Api__PublicHost
+curl -fsS https://<name>.nodes.<zone>/health                     # served on the anchor-issued cert
+```
+
+The roster then reaches the node at `https://<name>.nodes.<zone>` and every game server installed on it
+is published as `<game>.play.<zone>`. A name looked up before it existed is negatively cached by
+resolvers for up to 30 minutes; check at the zone's nameserver or with `curl --resolve`.
+
+Removing the node from the Cluster page releases its names three minutes later. A node that is only
+offline keeps them.
+
+### 10·b. Standalone
 
 The unit binds `http://0.0.0.0:8080` and serves both the SPA at `/` and the API under `/api/v1` on
-that one origin. On a LAN that is already enough — `http://<ip>:8080` in a browser.
-
-Everything past that is in `/etc/kgsm-api/kgsm-api.env`, where **every host-specific value ships
-commented out on purpose**: a domain or a certificate path that is live on one host is wrong on
-every other. Uncommenting is how this host says which one it is. Fill in only what question 4
-actually asked for:
+that one origin. On a LAN that is already enough — `http://<ip>:8080` in a browser. Fill in only what
+question 4 actually asked for:
 
 - **A public origin over TLS.** Kestrel terminates TLS itself — there is no reverse proxy in this
   design. The four `Api__Urls` / `Kestrel__Certificates__*` lines are uncommented **together**: an
@@ -328,13 +381,6 @@ actually asked for:
 - **`Api__DiscordRedirectUri`** and the provider keys — only for question 6, and both callbacks
   (`/auth/<provider>/callback` and `/auth/identities/<provider>/callback`) must be registered on the
   application or linking is refused at the provider before this host sees it.
-
-Ports on the host firewall are the operator's; KGSM opens and closes *game* ports and does not touch
-the panel's.
-
-```bash
-sudo systemctl restart kgsm-api.service       # after any edit to that file
-```
 
 ## 11. The decisions left deliberately off
 
@@ -390,8 +436,9 @@ systemctl --failed --no-pager                     # compare against §13, not ag
 kgsm --version                                    # the engine answers
 sudo -u kgsm -H kgsm libraries list               # at least one library, state online
 
-curl -fsS http://127.0.0.1:8080/health            # kgsm-api answers
+curl -fsS http://127.0.0.1:8080/health            # kgsm-api answers (8097 on a cluster node)
 curl -fsS http://127.0.0.1:8080/ -o /dev/null -w '%{http_code}\n'   # 200 = the SPA is served
+curl -fsS https://<name>.nodes.<zone>/health      # cluster node only: served at its assigned name
 
 ls /var/lib/kgsm/leaves/                          # one descriptor per installed leaf
 ls /var/lib/kgsm/events/                          # the event journal directory exists
