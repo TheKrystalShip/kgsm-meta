@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.8.0]
+
+### Added — every install is a cluster: a machine with no secret founds its own
+
+kgsm-api signs nobody in and accepts only sessions its cluster's auth anchor minted, so a machine with
+a blank `Cluster__Secret` had nobody who could sign anyone in. kgsm-base's new install hook fills a
+blank secret on first install with a generated one and writes `/etc/kgsm/cluster-founded` — the
+SHA-256 of that secret — which kgsm-auth-anchor's own install hook reads to switch the anchor on. A
+machine given another cluster's secret before install never has the record, so its anchor stays
+installed and off. Upgrades found nothing.
+
+`NODE-PROVISIONING.md` §9 sends the first sign-in to the anchor's one-time password; §10·a gains the
+steps a machine that founded its own cluster takes before joining another — anchor off, record
+removed, each member's cluster store cleared, in that order — because a member's memory of its old
+cluster would otherwise gossip a stale holder into the new one; §10·b is "its own cluster": the node's
+browser address, the anchor's allowed origin, and the anchor as the place to sign in.
+
 ## [1.7.0]
 
 ### Added — the auth anchor's preset entry

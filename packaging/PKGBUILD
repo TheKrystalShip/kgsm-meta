@@ -38,6 +38,8 @@ depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils' 'kgsm-keyring')
 # create-if-absent-never-clobber: an upgrade writes .pacnew beside an edited file, never over it.
 backup=('etc/kgsm/kgsm-auth.env'
         'etc/kgsm/kgsm-cluster.env')
+# Founds a cluster of one on a machine whose secret is blank at first install.
+install="${pkgname}.install"
 
 pkgver() {
     "${startdir}/../deploy/version.sh" --pkgver
@@ -64,9 +66,10 @@ package() {
     install -Dm640 "${base}/kgsm-auth.env" \
         "${pkgdir}/etc/kgsm/kgsm-auth.env"
 
-    # The cluster secret every member on the host holds, blank for the same reason. One file rather
-    # than one copy per member: a machine can run a node and an anchor, and they must agree on it or
-    # each concludes separately that it is not clustered.
+    # The cluster secret every member on the host holds, shipped blank because no package carries a
+    # credential; the install hook generates one on a machine that founds its own cluster. One file
+    # rather than one copy per member: a machine runs a node and an anchor, and they must agree on it
+    # or each concludes separately that it is not clustered.
     install -Dm640 "${base}/kgsm-cluster.env" \
         "${pkgdir}/etc/kgsm/kgsm-cluster.env"
 

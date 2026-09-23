@@ -41,9 +41,9 @@ names exactly what is lost by skipping it, so a person can answer "skip" and get
 | 1 | **Root access** — a root shell, or the `sudo` password | Installing packages, writing `/etc/pacman.conf` and trusting a key are all privileged | Nothing can proceed; stop here |
 | 2 | **Which components this node runs** (see the roles in §4) | A node is a selection, not a fixed set. A machine with no GPU should not be asked to serve models; a second node usually wants no Discord bot | Default to the whole `kgsm-node` group, and say that is what was chosen |
 | 3 | **Where game server instances live** — an absolute path on this host | Which disk holds tens of GB of game data is a hardware decision (§8) | Instances land on the root filesystem, in the library the engine seeds itself |
-| 4 | **Standalone, or joining a cluster.** Standalone: the public address the panel is reached at, and whether it needs TLS. Cluster: the cluster secret, this machine's public host (its dynamic-DNS name, with 443 forwarded to it), and an address the cluster's DNS holder reaches it at before it has a name (§10) | Each describes one network and is wrong on any other | Standalone on `http://<lan-ip>:8080`; nothing off the LAN reaches it |
+| 4 | **Its own cluster, or joining one.** Its own: the public address the panel is reached at, and whether it needs TLS. Joining: the cluster's secret, this machine's public host (its dynamic-DNS name, with 443 forwarded to it), and an address the cluster's DNS holder reaches it at before it has a name (§10) | Each describes one network and is wrong on any other | Its own cluster on `http://<lan-ip>:8080`, signed into at `:8098`; nothing off the LAN reaches it |
 | 5 | **A Discord bot token** — only if `kgsm-bot` was selected | It comes from a Discord application only they own | `kgsm-bot.service` stays stopped and `kgsm-node-status` keeps saying so |
-| 6 | **A Discord OAuth client id + secret** — standalone only, if people sign in through Discord. A cluster node signs nobody in: the auth anchor does | Same application, and both callbacks must be registered on it | Everyone signs in with a KGSM username and password, which needs nothing |
+| 6 | **A Discord OAuth client id + secret** — only on a machine that runs its own cluster, if people sign in through Discord. A node signs nobody in: the auth anchor does, so the application is the anchor's | Same application, and both callbacks must be registered on it | Everyone signs in with a KGSM username and password, which needs nothing |
 | 7 | **The inference backend** — Ollama, or the llama.cpp units; only if `kgsm-llm` was selected | A host runs one or the other; both loaded means two copies of the weights | The assistant starts and every turn fails until one exists (§11) |
 | 8 | **A Steam account username** — only for games Steam will not serve anonymously | It is their account, and the login is interactive once | Anonymous-install games work; account-gated ones refuse |
 
@@ -283,27 +283,29 @@ path.
 
 ## 9. Sign in for the first time
 
-`kgsm-api`'s first start finds an empty account store, creates the administrator `admin`, and leaves
-its generated one-time password in a file:
+People sign in at the cluster's **auth anchor**, never at a node: `kgsm-api` signs nobody in and
+accepts only sessions the anchor minted. On a machine that founded its own cluster the anchor runs
+here, and its first start finds an empty account store, creates the administrator `admin`, and leaves
+the generated one-time password in a file:
 
 ```bash
-sudo cat /var/lib/kgsm-api/initial-admin-password
+sudo cat /var/lib/kgsm-auth-anchor/initial-admin-password
 ```
 
 Give it to the person. **It is removed the first time that account signs in with a password**, so it
 exists exactly between those two moments — a node past that point has no file and
-`kgsm-node-status` says nothing about it, which is not an error.
+`kgsm-node-status` says nothing about it, which is not an error. **Do not choose a password for the
+person and do not set one from a script** — it would be a credential this run invented, and it would
+sit in shell history.
 
-The same thing from a terminal, on a host where the file is gone and the store is still empty:
+A machine that joined a cluster somebody else runs has no anchor of its own running and no password
+file: its people already have accounts at that cluster's anchor, which replication brings here.
+
+`kgsm-api`'s own log says which member signs its sessions, or that none does:
 
 ```bash
-sudo -u kgsm /opt/kgsm-api/kgsm-api user bootstrap        # prints the password instead
-sudo -u kgsm /opt/kgsm-api/kgsm-api user list
+journalctl -u kgsm-api | grep -E 'signed by the auth anchor|no member of this cluster holds'
 ```
-
-Whichever gets there first wins; the other reports there is nothing to do. **Do not choose a password
-for the person and do not set one from a script** — it would be a credential this run invented, and
-it would sit in shell history.
 
 Who may do what is not a sign-in question. It is set on the KGSM account in the Control Panel, and no
 Discord guild, group or role grants anything on any surface.
@@ -331,7 +333,26 @@ public URL.
 | | `Api__HostId` | The member id, stable forever. Blank takes the machine name |
 | | `Api__PublicHost` | The machine's dynamic-DNS name, or a fixed public address. Blank: the node is a member but gets no name |
 | | `Api__CorsOrigins` | The panel's origin, `https://kgsm.<zone>` |
-| never set | `Api__PublicBaseUrl`, `Api__ConnectHost`, `Api__ClusterGossipUrl`, `Kestrel__*`, `Api__DiscordRedirectUri`, provider keys | Their values come from the cluster |
+| | `Api__LocalAnchorUrl` | Empty: this node joins a cluster somebody else runs and never introduces itself to an anchor on its own machine |
+| never set | `Api__PublicBaseUrl`, `Api__ConnectHost`, `Api__ClusterGossipUrl`, `Kestrel__*`, provider keys | Their values come from the cluster |
+
+**A machine that founded its own cluster first stops being one.** kgsm-base founds a cluster on a
+machine whose secret was blank at first install, and that machine's anchor holds its accounts. Its
+members remember that cluster — who held the accounts, at what version — and gossip would carry it into
+the cluster being joined, where a tie on the version goes to whichever member id sorts later: this
+machine's anchor could be handed the joined cluster's accounts. So, before the secret changes, and in
+this order:
+
+```bash
+sudo systemctl disable --now kgsm-auth-anchor.service      # this machine no longer holds accounts
+sudo systemctl stop kgsm-api.service                        # and every other member unit on it
+sudo rm /etc/kgsm/cluster-founded                           # it did not found the cluster it is joining
+sudo rm /var/lib/kgsm-api/kgsm-api.cluster.db* \
+        /var/lib/kgsm-auth-anchor/cluster.db*               # each member's memory of the old cluster
+```
+
+Then set the secret below and start the node. Accounts made in the old cluster stay behind: joining is
+not a merge, and `cluster-auth-plan.md` §8 is where reconciling them lives.
 
 Machine prerequisites:
 
@@ -373,23 +394,33 @@ resolvers for up to 30 minutes; check at the zone's nameserver or with `curl --r
 Removing the node from the Cluster page releases its names three minutes later. A node that is only
 offline keeps them.
 
-### 10·b. Standalone
+### 10·b. Its own cluster
 
-The unit binds `http://0.0.0.0:8080` and serves both the SPA at `/` and the API under `/api/v1` on
-that one origin. On a LAN that is already enough — `http://<ip>:8080` in a browser. Fill in only what
-question 4 actually asked for:
+A machine whose secret was blank at first install is a cluster of one: kgsm-base generated its secret,
+its auth anchor is on and holds the accounts, and `kgsm-api` introduces itself to that anchor at
+`http://127.0.0.1:8098` on its own, because nobody can sign in to do it by hand until it has.
 
-- **A public origin over TLS.** Kestrel terminates TLS itself — there is no reverse proxy in this
-  design. The four `Api__Urls` / `Kestrel__Certificates__*` lines are uncommented **together**: an
-  https bind with no certificate fails exactly as a certificate path with no file does. The env file
+The node unit binds `http://0.0.0.0:8080` and serves both the SPA at `/` and the API under `/api/v1` on
+that one origin; the anchor binds `0.0.0.0:8098`, and people sign in there. On a LAN that is enough for
+the network — open `http://<ip>:8080`, and give the panel `http://<ip>:8098` as the address to sign in
+at. Fill in only what question 4 actually asked for:
+
+- **`Api__PublicBaseUrl`** — the address a browser reaches this node at, `http://<ip>:8080` or its
+  public origin. The node was introduced to its anchor over loopback, so without it the cluster's
+  roster hands a browser `127.0.0.1`.
+- **`Anchor__AllowedOrigins`** in `/etc/kgsm-auth-anchor/kgsm-auth-anchor.env` — the panel's origin,
+  the same address, so the panel may sign people in at the anchor. Without it every sign-in fails in
+  the browser before the anchor sees it.
+- **A public origin over TLS.** Kestrel terminates TLS itself on both — there is no reverse proxy in
+  this design. The four `Api__Urls` / `Kestrel__Certificates__*` lines are uncommented **together**:
+  an https bind with no certificate fails exactly as a certificate path with no file does. The env file
   carries the certbot invocation and the deploy hook that makes the certificate readable by the
-  non-root service.
-- **`Api__AuthFrontendUrl`** — where the SPA is served, which is this same origin.
-- **`Api__CorsOrigins`** — needed only when a *different* origin must reach this API, which on a
-  cluster means another node's panel. Same-origin needs none, and unset means same-origin only.
-- **`Api__DiscordRedirectUri`** and the provider keys — only for question 6, and both callbacks
-  (`/auth/<provider>/callback` and `/auth/identities/<provider>/callback`) must be registered on the
-  application or linking is refused at the provider before this host sees it.
+  non-root service; the anchor's own env file takes the same four keys for its port.
+- **`Api__CorsOrigins`** — needed only when a *different* origin must reach this API. Same-origin needs
+  none, and unset means same-origin only.
+- **The Discord application**, only for question 6, goes in `/etc/kgsm/kgsm-auth.env`, which the anchor
+  reads; its callbacks are the anchor's, `/auth/<provider>/callback` and
+  `/auth/identities/<provider>/callback` on the anchor's address.
 
 ## 11. The decisions left deliberately off
 

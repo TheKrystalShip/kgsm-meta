@@ -44,9 +44,10 @@ disable kgsm-speech.service
 # unit changes nothing.
 
 # ── Opt-in: installed, and a decision rather than a default ───────────────────
-# The auth anchor holds the whole cluster's accounts, and a cluster has one. Which machine holds it
-# is an administrator's choice, so installing the package claims nothing — a second machine that has
-# it installed and switched off is a promotion candidate rather than a second authority.
+# The auth anchor holds the whole cluster's accounts, and a cluster has one. The preset leaves it off,
+# and its own install hook switches it on only where this machine founded its cluster
+# (/etc/kgsm/cluster-founded matching the secret). Everywhere else it stays installed and off — a
+# promotion candidate rather than a second authority, and never a fresh claim racing the holder.
 disable kgsm-auth-anchor.service
 
 # The indexer starts building a retrieval corpus, which costs GPU time and disk on a host that may
