@@ -2,11 +2,14 @@
 # machine with no cluster secret has nobody who can sign anyone in to it. On first install, a machine
 # whose secret is still blank therefore founds a cluster of its own: a generated secret, and the
 # founded-here record beside it — the SHA-256 of that secret — which is what switches this machine's
-# auth anchor on (kgsm-auth-anchor's own install hook reads it).
+# auth anchor on (kgsm-auth-anchor's own install hook reads it), and what lets that anchor claim the
+# accounts and the node introduce itself to it. Both compare the record with the secret they hold, so
+# the record means "founded here" only while the machine holds the secret it generated.
 #
 # A machine meant to join a cluster somebody else runs is given that cluster's secret before this
-# package is installed, or follows kgsm-meta/NODE-PROVISIONING.md §10·a after, and never has the
-# record: its anchor stays installed and off, as the promotion candidate a cluster keeps.
+# package is installed and never has the record: its anchor stays installed and off, as the promotion
+# candidate a cluster keeps. One given the secret after (NODE-PROVISIONING.md §10·a) keeps a record
+# naming a secret it no longer holds, which is the same answer.
 #
 # post_install only. An upgrade never founds anything: a machine installed before this existed is
 # already clustered or already standing alone by decision, and neither is this hook's to change.
@@ -36,9 +39,9 @@ post_install() {
   This machine founded a cluster of its own: a secret was generated in /etc/kgsm/kgsm-cluster.env,
   and the auth anchor installed beside the node holds this cluster's accounts. People sign in there.
 
-  To join a cluster somebody else runs instead, follow kgsm-meta/NODE-PROVISIONING.md §10·a — it
-  switches this machine's anchor off before the secret changes, which is what keeps the two clusters'
-  accounts from meeting.
+  To join a cluster somebody else runs instead, give this machine that cluster's secret and restart
+  its members (kgsm-meta/NODE-PROVISIONING.md §10·a). Each member forgets this cluster when the secret
+  changes, and the anchor here stands by rather than competing for the joined cluster's accounts.
 
 MSG
 }

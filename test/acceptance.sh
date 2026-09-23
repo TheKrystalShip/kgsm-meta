@@ -22,9 +22,13 @@
 #     SigLevel = Required DatabaseRequired — the same enforcement a real node runs under
 #   * installing the kgsm-node group leaves the ready units ACTIVE with nothing else run
 #   * exactly one unit is blocked, on exactly one key: kgsm-bot on Discord__Token
-#   * kgsm-api minted its own signing key and its first administrator, both 0600, and the host minted
-#     the secret its surfaces prove themselves to each other with
-#   * that administrator can sign in with the password in the file
+#   * the machine founded a cluster of its own: a generated secret, the founding record, and the auth
+#     anchor switched on, holding the accounts, with its signing key and its first administrator's
+#     one-time password both 0600
+#   * the node joined that anchor with nobody signed in, and that administrator signs in at the anchor
+#     with the password in the file
+#   * given the operator's answer about the address, the node names the anchor as its sign-in provider
+#     and the panel it serves is in the anchor's client registry without anybody entering it
 #   * the API found every leaf this node installed WITHOUT being told where any of them is, and
 #     reports the one it did not install as absent rather than as unreachable
 #
@@ -169,35 +173,46 @@ INSTALL_SCRIPT="$(sed -E 's/^(pacman -S[a-z]*)( |$)/\1 --noconfirm\2/' <<< "$INS
 
 # ---------------------------------------------------------------------------------- the container
 
+# The second machine, used once the first is proven: a machine that founded its own cluster, joining the
+# first one's.
+JOINER="${CONTAINER}-joiner"
+
 cleanup() {
     if (( KEEP )); then
-        warn "container ${CONTAINER} left running — remove it with: docker rm -f ${CONTAINER}"
+        warn "containers ${CONTAINER} ${JOINER} left running — remove them with: docker rm -f ${CONTAINER} ${JOINER}"
         return
     fi
-    docker rm -f "$CONTAINER" >/dev/null 2>&1
+    docker rm -f "$CONTAINER" "$JOINER" >/dev/null 2>&1
 }
 trap cleanup EXIT
 
-docker rm -f "$CONTAINER" >/dev/null 2>&1
+docker rm -f "$CONTAINER" "$JOINER" >/dev/null 2>&1
 
-log "booting ${IMAGE} with systemd as PID 1"
-# --cgroupns=private is not a detail: it gives the container its own cgroup root, so a privileged
-# init in here cannot see or act on the host's kgsm.slice and the game servers under it.
 MOUNT=()
 (( ! PUBLISHED )) && MOUNT=(-v "${REPO_DIR}:/srv/kgsm:ro")
-docker run -d --name "$CONTAINER" \
-    --privileged --cgroupns=private --stop-signal SIGRTMIN+3 \
-    --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
-    "${MOUNT[@]}" \
-    "$IMAGE" /usr/lib/systemd/systemd >/dev/null || { err "the container did not start"; exit 1; }
 
-for _ in $(seq 1 60); do
-    state="$(docker exec "$CONTAINER" systemctl is-system-running 2>/dev/null)"
-    [[ "$state" == running || "$state" == degraded ]] && break
-    sleep 1
-done
-[[ -n "${state:-}" ]] || { err "systemd never came up in the container"; exit 1; }
-log "systemd is ${state}"
+# boot_node <container> — an Arch machine with systemd as PID 1, up and settled.
+boot_node() {
+    local name="$1" state=""
+    log "booting ${IMAGE} as ${name} with systemd as PID 1"
+    # --cgroupns=private is not a detail: it gives the container its own cgroup root, so a privileged
+    # init in here cannot see or act on the host's kgsm.slice and the game servers under it.
+    docker run -d --name "$name" \
+        --privileged --cgroupns=private --stop-signal SIGRTMIN+3 \
+        --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
+        "${MOUNT[@]}" \
+        "$IMAGE" /usr/lib/systemd/systemd >/dev/null || { err "${name} did not start"; exit 1; }
+
+    for _ in $(seq 1 60); do
+        state="$(docker exec "$name" systemctl is-system-running 2>/dev/null)"
+        [[ "$state" == running || "$state" == degraded ]] && break
+        sleep 1
+    done
+    [[ -n "$state" ]] || { err "systemd never came up in ${name}"; exit 1; }
+    log "systemd is ${state} in ${name}"
+}
+
+boot_node "$CONTAINER"
 # The image's own systemd-firstboot.service fails in a container and has nothing to do with KGSM.
 # Record the baseline so a later failure is read against it rather than against zero.
 baseline="$(docker exec "$CONTAINER" systemctl list-units --state=failed --no-legend --plain \
@@ -206,51 +221,57 @@ note "failed before installing anything: ${baseline:-none}"
 
 # ------------------------------------------------------------------------------------- the install
 
-INSTALLLOG="$(mktemp /tmp/kgsm-acceptance-install.XXXXXX.log)"
-
-log "running the README's install block"
-# `set -euo pipefail` is the test's, not the README's: a person watching a terminal sees a failing
-# command and stops, and this is how a script gets the same answer.
-#
-# It is written to a file and run from there rather than piped into `bash -s`, so that the block's
-# own commands keep a stdin of their own — `pacman-key --add -` reads the key off a pipe, and a
-# script that IS stdin leaves them reading the rest of itself.
-(( PUBLISHED )) || docker exec -i "$CONTAINER" tee /tmp/setup-node.sh >/dev/null < "$SETUP"
-
-{
-    printf 'set -euo pipefail\n'
-    printf '%s\n' "$INSTALL_SCRIPT"
-} | docker exec -i "$CONTAINER" tee /tmp/kgsm-install.sh >/dev/null
-docker exec "$CONTAINER" bash /tmp/kgsm-install.sh >"$INSTALLLOG" 2>&1
-install_rc=$?
-
 # Members this suite does not install. None of them is skipped for being broken, and the exclusion is
 # named out loud below rather than quietly narrowing what "the kgsm-node group" means:
 #
 #   kgsm-speech  pulls 813MB of models as a hard dependency, to serve recognition and synthesis a node
 #                without a GPU cannot usefully run. Paying that download on every run buys nothing.
-#   kgsm-llm     the assistant, and kgsm-web the Control Panel SPA. Both are exercised on the host that
-#                has the hardware for them; here they would only re-prove what the leaf below proves
-#                better — that a leaf which is NOT installed is reported absent.
+#   kgsm-llm     the assistant, exercised on the host that has the hardware for it; here it would only
+#                re-prove what the leaf below proves better — that a leaf which is NOT installed is
+#                reported absent.
 #
 # Their absence is itself under test: the API must report each as absent rather than as a leaf that is
-# present and unreachable, which is the other half of the discovery this suite exists to check.
-SKIP_MEMBERS=(kgsm-speech kgsm-llm kgsm-web)
+# present and unreachable, which is the other half of the discovery this suite exists to check. The
+# Control Panel is installed: the panel a node serves is a client of the cluster's sign-in provider, and
+# its arriving in the provider's registry unasked is one of the things measured.
+SKIP_MEMBERS=(kgsm-speech kgsm-llm)
 
-if (( install_rc == 0 )); then
+# install_node <container> <log> — the README's install block, then the kgsm-node group less the members
+# above. Returns the first failing step's status.
+install_node() {
+    local name="$1" logfile="$2" rc skip_re members
+    log "running the README's install block on ${name}"
+    # `set -euo pipefail` is the test's, not the README's: a person watching a terminal sees a failing
+    # command and stops, and this is how a script gets the same answer.
+    #
+    # It is written to a file and run from there rather than piped into `bash -s`, so that the block's
+    # own commands keep a stdin of their own — `pacman-key --add -` reads the key off a pipe, and a
+    # script that IS stdin leaves them reading the rest of itself.
+    (( PUBLISHED )) || docker exec -i "$name" tee /tmp/setup-node.sh >/dev/null < "$SETUP"
+    {
+        printf 'set -euo pipefail\n'
+        printf '%s\n' "$INSTALL_SCRIPT"
+    } | docker exec -i "$name" tee /tmp/kgsm-install.sh >/dev/null
+    docker exec "$name" bash /tmp/kgsm-install.sh >"$logfile" 2>&1
+    rc=$?
+    (( rc == 0 )) || return "$rc"
+
     # The README's second command is `pacman -S kgsm-node`, whose prompt defaults to every member. A
     # script answers it by naming the members instead — read from the group rather than from a list
     # kept here, so a member added to the ecosystem is installed without this file being touched.
     skip_re="$(printf '%s|' "${SKIP_MEMBERS[@]}")"; skip_re="${skip_re%|}"
-    members="$(docker exec "$CONTAINER" pacman -Sqg kgsm-node 2>/dev/null \
+    members="$(docker exec "$name" pacman -Sqg kgsm-node 2>/dev/null \
         | grep -vE "^(${skip_re})$" | tr '\n' ' ')"
-    log "installing the kgsm-node group, less ${SKIP_MEMBERS[*]}"
+    log "installing the kgsm-node group on ${name}, less ${SKIP_MEMBERS[*]}"
     note "installing: ${members}"
     # Unquoted on purpose: the member list is words, and a package name cannot contain a space.
     # shellcheck disable=SC2086
-    docker exec "$CONTAINER" pacman -S --noconfirm $members >>"$INSTALLLOG" 2>&1
-    install_rc=$?
-fi
+    docker exec "$name" pacman -S --noconfirm $members >>"$logfile" 2>&1
+}
+
+INSTALLLOG="$(mktemp /tmp/kgsm-acceptance-install.XXXXXX.log)"
+install_node "$CONTAINER" "$INSTALLLOG"
+install_rc=$?
 
 # What "settled" means, in three parts, because the obvious one is wrong. `is-active` on a Type=simple
 # unit is true the instant the process is exec'd — before the API has opened its stores, minted its
@@ -261,18 +282,22 @@ fi
 # So: systemd has no queued jobs left (the post-transaction hook starts units one at a time, and a unit
 # ordered after network-online.target waits on systemd-networkd-wait-online, which in a container Docker
 # configures the interface for takes a couple of minutes to give up), the API answers its own health
-# endpoint, and the one-time files its bootstrap writes are on disk. The last is needed because the
-# bootstrapper is a hosted service: Kestrel can be listening while it is still running.
+# endpoint, and the one-time password the anchor's bootstrap writes is on disk. The last is needed
+# because the bootstrapper is a hosted service: Kestrel can be listening while it is still running.
 #
 # Every part is bounded and none of them replaces an assertion — a file that never arrives still fails
 # its check below, with the message it always had.
-log "letting the units settle"
-for _ in $(seq 1 90); do
-    docker exec "$CONTAINER" systemctl list-jobs --no-pager 2>/dev/null | grep -q 'No jobs' || { sleep 2; continue; }
-    docker exec "$CONTAINER" curl -fsS -o /dev/null http://127.0.0.1:8080/health 2>/dev/null || { sleep 2; continue; }
-    docker exec "$CONTAINER" test -e /var/lib/kgsm-api/initial-admin-password 2>/dev/null && break
-    sleep 2
-done
+settle_node() {
+    local name="$1"
+    log "letting the units on ${name} settle"
+    for _ in $(seq 1 90); do
+        docker exec "$name" systemctl list-jobs --no-pager 2>/dev/null | grep -q 'No jobs' || { sleep 2; continue; }
+        docker exec "$name" curl -fsS -o /dev/null http://127.0.0.1:8080/health 2>/dev/null || { sleep 2; continue; }
+        docker exec "$name" test -e /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null && break
+        sleep 2
+    done
+}
+settle_node "$CONTAINER"
 
 # ------------------------------------------------------------------------------------ assertions
 
@@ -297,6 +322,7 @@ READY=(
     kgsm-reactor.service
     kgsm-journal-prune.timer
     kgsm-api.service
+    kgsm-auth-anchor.service
     kgsm-firewall.socket
 )
 for u in "${READY[@]}"; do
@@ -326,8 +352,32 @@ check_mode() {
     else bad "${label}: ${path} is ${mode}, expected ${want}"
     fi
 }
-check_mode /var/lib/kgsm-api/initial-admin-password 600 "the first administrator's password"
-check_mode /var/lib/kgsm-api/signing-key            600 "kgsm-api's self-minted signing key"
+check_mode /var/lib/kgsm-auth-anchor/initial-admin-password 600 "the first administrator's password"
+check_mode /var/lib/kgsm-auth-anchor/session-signing.pem    600 "the anchor's self-minted signing key"
+
+# The cluster of one. A machine whose secret was blank at first install generates one and records that
+# it founded the cluster — which is what switched its anchor on, and what lets that anchor claim the
+# accounts and the node introduce itself to it.
+secret_set="$(docker exec "$CONTAINER" grep -cE '^[[:space:]]*Cluster__Secret[[:space:]]*=[[:space:]]*[^[:space:]]' \
+    /etc/kgsm/kgsm-cluster.env 2>/dev/null)"
+expect "${secret_set:-0}" 1 "the install generated a cluster secret"
+check_mode /etc/kgsm/cluster-founded 644 "the record that this machine founded its cluster"
+
+anchor_log="$(docker exec "$CONTAINER" journalctl -u kgsm-auth-anchor.service --no-pager -o cat 2>/dev/null)"
+if grep -q "this member holds the cluster's accounts" <<< "$anchor_log"; then
+    ok "the anchor holds the cluster's accounts"
+else
+    bad "the anchor never said it holds the cluster's accounts"
+fi
+
+# Read before anybody signs in: the introduction is the node's own, because nobody can sign in to make
+# it until the node knows who holds the accounts.
+api_log="$(docker exec "$CONTAINER" journalctl -u kgsm-api.service --no-pager -o cat 2>/dev/null)"
+if grep -q 'joined the auth anchor on this machine' <<< "$api_log"; then
+    ok "the node joined the anchor on its machine with nobody signed in"
+else
+    bad "the node never joined the anchor on its machine"
+fi
 
 # The reactor's rules, which exist nowhere in its code: the package ships them beside the binary and
 # the leaf installs them into its own state directory the first time it starts. A node that came up
@@ -383,20 +433,58 @@ fi
 expect "$(docker exec "$CONTAINER" "${AS_KGSM[@]}" kgsm config get default_library 2>/dev/null)" \
        default "the seeded library is named as this host's default"
 
-# The handoff, end to end: the password in that file signs the account in that file in.
-user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
-pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-api/initial-admin-password 2>/dev/null)"
+# The operator's answer about the address, written where NODE-PROVISIONING.md §10·b writes it: the
+# address a browser reaches the node at — this machine's private address, as a LAN install's is — and the
+# URL a browser signs in at, which the anchor stamps on every session as its issuer. Everything below reads
+# them back from the cluster rather than from here: the node learns the issuer over gossip, and the anchor
+# learns the node's address the same way.
+ip_of() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"; }
+a_ip="$(ip_of "$CONTAINER")"
+ISSUER="http://127.0.0.1:8098"
+docker exec "$CONTAINER" sh -c "printf 'Api__PublicBaseUrl=http://%s:8080\n' '${a_ip}' >> /etc/kgsm-api/kgsm-api.env"
+docker exec "$CONTAINER" sh -c "printf 'Anchor__Issuer=%s\n' '${ISSUER}' >> /etc/kgsm-auth-anchor/kgsm-auth-anchor.env"
+docker exec "$CONTAINER" systemctl restart kgsm-api.service kgsm-auth-anchor.service
+settle_node "$CONTAINER"
+discovered=""
+for _ in $(seq 1 45); do
+    discovered="$(docker exec "$CONTAINER" curl -s http://127.0.0.1:8080/.well-known/oauth-protected-resource 2>/dev/null \
+        | grep -oE '"authorization_servers" *: *\[ *"[^"]+"' | sed 's/.*"\([^"]*\)"$/\1/')"
+    [[ "$discovered" == "$ISSUER" ]] && break
+    sleep 2
+done
+expect "$discovered" "$ISSUER" "the node names the anchor as its sign-in provider"
+
+# The handoff, end to end: the password in that file signs the account in that file in, at the anchor —
+# the node signs nobody in.
+user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
+pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
 token=""
 if [[ -n "$user" && -n "$pass" ]]; then
     login="$(docker exec "$CONTAINER" curl -s -w '\n%{http_code}' \
-        -X POST http://127.0.0.1:8080/auth/login -H 'Content-Type: application/json' \
+        -X POST http://127.0.0.1:8098/auth/sign-in -H 'Content-Type: application/json' \
         -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" 2>/dev/null)"
     code="$(printf '%s' "$login" | tail -n1)"
-    expect "$code" 200 "'${user}' signs in with the password from the file"
-    # Kept for the capability assertions below, which are the admin's view of the node.
+    expect "$code" 200 "'${user}' signs in at the anchor with the password from the file"
+    # Kept for the assertions below, which are the admin's view of the node and of the anchor.
     token="$(printf '%s' "$login" | head -n-1 | grep -oE '"token" *: *"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
 else
     bad "could not read a username and password out of the initial-admin-password file"
+fi
+
+# The panel this node serves, registered with the provider by the node's own announcement. Nobody
+# entered it: it arrives over gossip, joined to the address the roster holds for the node.
+clients=""
+for _ in $(seq 1 30); do
+    clients="$(docker exec "$CONTAINER" curl -s -H "Authorization: Bearer ${token}" \
+        http://127.0.0.1:8098/auth/cluster/clients 2>/dev/null)"
+    grep -q '/signed-in"' <<< "$clients" && break
+    sleep 2
+done
+panel="$(grep -oE '"redirectUris" *: *\[ *"[^"]+/signed-in"' <<< "$clients" | sed 's/.*"\([^"]*\)"$/\1/' | head -1)"
+if [[ -n "$panel" ]] && grep -q '"source" *: *"member"' <<< "$clients"; then
+    ok "the panel is a client of the provider without anybody entering it (${panel})"
+else
+    bad "the panel never reached the provider's client registry: ${clients:-no answer}"
 fi
 
 # Every leaf this node installed, joined up. Each of these binds a fixed endpoint, and the panel is
@@ -449,9 +537,93 @@ check_mode /var/lib/kgsm/cluster         755 "what members of a cluster on one m
 check_mode /etc/kgsm/kgsm-auth.env    640 "the host's shared sign-in applications"
 check_mode /etc/kgsm/kgsm-cluster.env 640 "the host's shared cluster secret"
 
-# The secret three surfaces need and no person can supply. One file, minted by whichever of them
-# looked first, owner-only — the alternative is a node whose panel chat is silently dead.
-check_mode /var/lib/kgsm/auth/relay-secret 600 "the host's self-minted relay secret"
+# ---------------------------------------------------------------- a founding machine joins another
+#
+# A second machine installed the same way founds a cluster of its own, then joins the first one's by
+# taking its secret — the whole of NODE-PROVISIONING.md §10·a for a founding machine, with nothing
+# cleared by hand. What must not happen is the joiner's memory of its own cluster, or its own anchor,
+# competing with the cluster it joins for the accounts.
+echo
+log "a machine that founded its own cluster joins this one"
+boot_node "$JOINER"
+JOINLOG="$(mktemp /tmp/kgsm-acceptance-joiner.XXXXXX.log)"
+install_node "$JOINER" "$JOINLOG"
+expect "$?" 0 "the joiner installs with the README's commands"
+settle_node "$JOINER"
+
+joiner_anchor_log="$(docker exec "$JOINER" journalctl -u kgsm-auth-anchor.service --no-pager -o cat 2>/dev/null)"
+if grep -q "this member holds the cluster's accounts" <<< "$joiner_anchor_log"; then
+    ok "the joiner founded a cluster of its own, its anchor holding that cluster's accounts"
+else
+    bad "the joiner's anchor never held its own cluster's accounts"
+fi
+
+b_ip="$(ip_of "$JOINER")"
+secret="$(docker exec "$CONTAINER" sed -n 's/^[[:space:]]*Cluster__Secret[[:space:]]*=[[:space:]]*//p' \
+    /etc/kgsm/kgsm-cluster.env | tail -n1)"
+
+# The runbook's two steps on the joining machine: the secret, and a restart of every member on it.
+docker exec "$JOINER" sed -i "s/^[[:space:]]*Cluster__Secret[[:space:]]*=.*$/Cluster__Secret=${secret}/" \
+    /etc/kgsm/kgsm-cluster.env
+since="$(docker exec "$JOINER" date +%s)"
+docker exec "$JOINER" systemctl try-restart kgsm-api kgsm-auth-anchor kgsm-bot kgsm-assistant-service kgsm-dns \
+    2>/dev/null
+settle_node "$JOINER"
+
+# And the one step on the cluster being joined: an admin adds the machine. Asked at this machine's own
+# address rather than loopback, because a node records the address an admin reached it at as where the
+# joiner calls back.
+added="$(docker exec "$CONTAINER" curl -s -o /dev/null -w '%{http_code}' \
+    -X POST "http://${a_ip}:8080/api/v1/members" -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' -d "{\"url\":\"http://${b_ip}:8080\"}" 2>/dev/null)"
+case "$added" in 2??) ok "an admin of this cluster adds the joiner (HTTP ${added})" ;;
+                 *)   bad "adding the joiner answered HTTP ${added:-nothing}" ;; esac
+
+joiner_api_log="$(docker exec "$JOINER" journalctl -u kgsm-api.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
+joiner_anchor_log="$(docker exec "$JOINER" journalctl -u kgsm-auth-anchor.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
+
+if grep -q 'it held the state of a cluster whose secret this member no longer holds' <<< "$joiner_api_log"; then
+    ok "the joiner's node discarded what it knew of its old cluster on its own"
+else
+    bad "the joiner's node never discarded its old cluster's state"
+fi
+if grep -q 'waits for an admin to add it' <<< "$joiner_api_log"; then
+    ok "the joiner's node waited to be added rather than introducing itself to its own anchor"
+else
+    bad "the joiner's node did not say it waits to be added"
+fi
+if grep -q 'did not found the cluster it is in, so this anchor never claims' <<< "$joiner_anchor_log" \
+   && ! grep -q 'claimed them as' <<< "$joiner_anchor_log"; then
+    ok "the joiner's anchor never claimed the joined cluster's accounts"
+else
+    bad "the joiner's anchor claimed, or never said it would not"
+fi
+# Nobody introduces it to the cluster it is now in, so it stays out of the roster and serves nothing
+# until an administrator adds it as a promotion candidate. Asked rather than read from its log: a member
+# standing by refuses a sign-in with 503, naming whoever it knows holds the accounts.
+refused="$(docker exec "$JOINER" curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8098/auth/sign-in \
+    -H 'Content-Type: application/json' -d '{"username":"admin","password":"x"}' 2>/dev/null)"
+expect "$refused" 503 "the joiner's anchor stands by, signing nobody in"
+
+a_standing="$(docker exec "$CONTAINER" journalctl -u kgsm-auth-anchor.service --since "@${since}" --no-pager -o cat \
+    2>/dev/null | grep -c 'standing by')"
+expect "${a_standing:-0}" 0 "this cluster's anchor still holds its accounts after the join"
+
+joined_issuer=""
+for _ in $(seq 1 30); do
+    joined_issuer="$(docker exec "$JOINER" curl -s http://127.0.0.1:8080/.well-known/oauth-protected-resource 2>/dev/null \
+        | grep -oE '"authorization_servers" *: *\[ *"[^"]+"' | sed 's/.*"\([^"]*\)"$/\1/')"
+    [[ "$joined_issuer" == "$ISSUER" ]] && break
+    sleep 2
+done
+expect "$joined_issuer" "$ISSUER" "the joiner names this cluster's provider"
+
+# Who this cluster's administrator is on the joiner. Measured rather than asserted: the joiner's own
+# first administrator carries the same username, and reconciling one person's two accounts is
+# cluster-auth-plan.md §8's, not this join's.
+me="$(docker exec "$JOINER" curl -s -H "Authorization: Bearer ${token}" http://127.0.0.1:8080/api/v1/me 2>/dev/null \
+    | grep -oE '"tier" *: *"[^"]*"' | head -1)"
+info "this cluster's administrator on the joiner: ${me:-no answer}"
 
 # ------------------------------------------------------------------- measured, and not asserted
 #

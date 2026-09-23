@@ -333,26 +333,23 @@ public URL.
 | | `Api__HostId` | The member id, stable forever. Blank takes the machine name |
 | | `Api__PublicHost` | The machine's dynamic-DNS name, or a fixed public address. Blank: the node is a member but gets no name |
 | | `Api__CorsOrigins` | The panel's origin, `https://kgsm.<zone>` |
-| | `Api__LocalAnchorUrl` | Empty: this node joins a cluster somebody else runs and never introduces itself to an anchor on its own machine |
 | never set | `Api__PublicBaseUrl`, `Api__ConnectHost`, `Api__ClusterGossipUrl`, `Kestrel__*`, provider keys | Their values come from the cluster |
 
-**A machine that founded its own cluster first stops being one.** kgsm-base founds a cluster on a
-machine whose secret was blank at first install, and that machine's anchor holds its accounts. Its
-members remember that cluster — who held the accounts, at what version — and gossip would carry it into
-the cluster being joined, where a tie on the version goes to whichever member id sorts later: this
-machine's anchor could be handed the joined cluster's accounts. So, before the secret changes, and in
-this order:
+**A machine that founded its own cluster joins another the same way**, by taking that cluster's secret —
+nothing is cleared by hand. Every member's cluster store is bound to the secret it was written under, so
+on the restart after the secret changes each one discards the old cluster's roster and assignments
+before reading them. The anchor beside the node stays installed and never claims the joined cluster's
+accounts: `/etc/kgsm/cluster-founded` names the secret this machine generated, not the one it now holds,
+so it stands by until an administrator assigns the accounts to it, and the node waits to be added rather
+than introducing itself to it. Restart every member on the machine once the secret is set:
 
 ```bash
-sudo systemctl disable --now kgsm-auth-anchor.service      # this machine no longer holds accounts
-sudo systemctl stop kgsm-api.service                        # and every other member unit on it
-sudo rm /etc/kgsm/cluster-founded                           # it did not found the cluster it is joining
-sudo rm /var/lib/kgsm-api/kgsm-api.cluster.db* \
-        /var/lib/kgsm-auth-anchor/cluster.db*               # each member's memory of the old cluster
+sudo systemctl try-restart kgsm-api kgsm-auth-anchor kgsm-bot kgsm-assistant-service kgsm-dns
 ```
 
-Then set the secret below and start the node. Accounts made in the old cluster stay behind: joining is
-not a merge, and `cluster-auth-plan.md` §8 is where reconciling them lives.
+An anchor standing by holds nothing; `systemctl disable --now kgsm-auth-anchor.service` stops it
+entirely where it is not wanted as a promotion candidate. Accounts made in the old cluster stay behind:
+joining is not a merge, and `cluster-auth-plan.md` §8 is where reconciling them lives.
 
 Machine prerequisites:
 
@@ -408,9 +405,15 @@ at. Fill in only what question 4 actually asked for:
 - **`Api__PublicBaseUrl`** — the address a browser reaches this node at, `http://<ip>:8080` or its
   public origin. The node was introduced to its anchor over loopback, so without it the cluster's
   roster hands a browser `127.0.0.1`.
-- **`Anchor__AllowedOrigins`** in `/etc/kgsm-auth-anchor/kgsm-auth-anchor.env` — the panel's origin,
-  the same address, so the panel may sign people in at the anchor. Without it every sign-in fails in
-  the browser before the anchor sees it.
+- **`Anchor__Issuer`** in `/etc/kgsm-auth-anchor/kgsm-auth-anchor.env` — the address people sign in
+  at, `http://<ip>:8098` or the anchor's public origin: the operator's answer about the address. The
+  anchor stamps it on every session, and the node names it at `/.well-known/oauth-protected-resource` to
+  any surface asking who signs people in. Until it is a URL the anchor's OpenID Connect doors sign
+  nobody in and the node names no provider. The panel the node serves registers itself with the anchor
+  as a client, at the address the roster holds for the node; nobody enters it.
+- **`Anchor__AllowedOrigins`** in the same file — the panel's origin, the same address as the node, so
+  the panel's own sign-in card may reach the anchor. Without it that sign-in fails in the browser before
+  the anchor sees it.
 - **A public origin over TLS.** Kestrel terminates TLS itself on both — there is no reverse proxy in
   this design. The four `Api__Urls` / `Kestrel__Certificates__*` lines are uncommented **together**:
   an https bind with no certificate fails exactly as a certificate path with no file does. The env file

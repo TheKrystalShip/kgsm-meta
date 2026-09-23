@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.9.0]
+
+### Changed — a founding machine joins another cluster by taking its secret
+
+Every member's cluster store is bound to the secret it was written under, the anchor claims the accounts
+only on the machine whose `/etc/kgsm/cluster-founded` names the secret it holds, and the node introduces
+itself to the anchor beside it on the same condition. So `NODE-PROVISIONING.md` §10·a for a founding machine
+is the same as for any other: set the secret, restart the members. The anchor it leaves behind stands by.
+kgsm-base's install message says so.
+
+§10·b's operator answer includes `Anchor__Issuer` — the address people sign in at — which the node then names
+to any surface asking who signs people in, and the panel the node serves registers itself with the anchor.
+
+### Changed — the acceptance test measures the install as it is
+
+`test/acceptance.sh` checks the cluster of one: the generated secret and the founding record, the anchor
+active and holding the accounts with its signing key and one-time password at `0600`, the node joined to it
+with nobody signed in, the administrator signing in at the anchor. Given the operator's answer about the
+address, the node names the anchor as its provider and the panel it serves reaches the anchor's client
+registry unasked; the panel is installed for that. A second machine then founds a cluster of its own and
+joins the first by taking its secret: its members discard their old cluster, its anchor never claims and
+stands by, the first cluster's anchor keeps the accounts, and the joiner names the first cluster's provider.
+
 ## [1.8.0]
 
 ### Added — every install is a cluster: a machine with no secret founds its own
