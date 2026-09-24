@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.11.0]
+
+### Added — moving a checkout-deployed host onto the packages
+
+`migrate/checkout-to-packages.sh --from-user <user> <phase|all|plan>` moves a host deployed from the
+workspace's checkouts onto the `[kgsm]` packages: it stops every game server and unit, snapshots what it
+changes, moves the checkout deploy's units, trees, grants and links aside under
+`/var/lib/kgsm-migration/moved/`, installs `kgsm-base` and checks the cluster secret is untouched, moves
+the engine's data, Steam's login and the command shortcuts into the `kgsm` account's home and re-owns the
+state, installs the packages keeping the host's env values (the packages' versions land as `.pacnew`),
+drains every instance into `library/` under that home through the engine's own move, starts what was
+running and verifies. `test/rehearse-migration.sh` runs it against a copy of this machine's deploy in a
+systemd container and asserts continuity: the same key, accounts, sessions, instances and settings.
+
+### Fixed — the acceptance test looks for the library where a node seeds it
+
+The marker check reads `library/.kgsm-library` under the engine's data directory, the root the engine
+seeds on a fresh node.
+
 ## [1.10.1]
 
 ### Fixed — the repository carries kgsm-dns

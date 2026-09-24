@@ -422,7 +422,7 @@ fi
 # compares its id to the registry's, so that an unmounted disk is not mistaken for the library it
 # normally holds — and a root without one is registered, permanently offline, and refuses every
 # install as unreachable.
-if docker exec "$CONTAINER" test -f "${KGSM_HOME_DATA}/instances/.kgsm-library" 2>/dev/null; then
+if docker exec "$CONTAINER" test -f "${KGSM_HOME_DATA}/library/.kgsm-library" 2>/dev/null; then
     ok "the library root carries its marker"
 else
     bad "the library root has no .kgsm-library marker — it would read offline forever"
