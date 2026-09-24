@@ -72,6 +72,7 @@ REPOS=(
     'kgsm-api:v'
     'kgsm-auth:v'
     'kgsm-bot:v'
+    'kgsm-dns:v'
     'kgsm-firewall:v'
     'kgsm-llm:v'
     'kgsm-meta:v,keyring-v'

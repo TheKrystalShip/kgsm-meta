@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1]
+
+### Fixed — the repository carries kgsm-dns
+
+`ci/aggregate.sh` collects `kgsm-dns`'s releases, so the DNS anchor installs from the `[kgsm]` repository
+like every other component.
+
 ## [1.10.0]
 
 ### Added — nginx reads the sites KGSM installs, with nobody editing nginx.conf
