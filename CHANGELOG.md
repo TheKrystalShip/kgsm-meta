@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.12.0]
+
+### Added — the preset enables kgsm-web-static
+
+`kgsm-web-static.service` is enabled like the other units a person configures: it serves nothing until
+`/etc/kgsm-web/panel.env` names a host, and the node's post-transaction hook does not start it before.
+
+### Removed — the checkout migration
+
+`migrate/checkout-to-packages.sh` and `test/rehearse-migration.sh` leave the repository. They moved one
+particular host's checkout deploy onto the packages once, which is not something a package node does, and
+this repository describes nodes without knowing any host.
+
 ## [1.11.0]
 
 ### Added — moving a checkout-deployed host onto the packages

@@ -32,6 +32,8 @@ enable kgsm-journal-prune.timer
 enable kgsm-api.service
 enable kgsm-bot.service
 enable kgsm-assistant-service.service
+# The static panel's name in /etc/kgsm-web/panel.env is its one value; blank, the unit serves nothing.
+enable kgsm-web-static.service
 
 # ── Socket-activated: the socket is the unit that is enabled ──────────────────
 # Enabling the .service as well would defeat the activation — kgsm-firewall's daemon holds root and
