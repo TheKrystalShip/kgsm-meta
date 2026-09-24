@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# nginx-reads-confd — add the conf.d include to nginx.conf's http block when it has none.
+#
+# Run by kgsm-nginx-confd.hook. A no-op on a machine without nginx and on one whose nginx.conf already
+# includes conf.d, whichever spelling it uses; it never reloads nginx, because a site that is installed
+# but not yet wanted must not be served by a package transaction.
+#
+set -euo pipefail
+
+CONF=/etc/nginx/nginx.conf
+[[ -f "$CONF" ]] || exit 0
+
+if grep -qE '^[[:space:]]*include[[:space:]]+(/etc/nginx/)?conf\.d/\*\.conf;' "$CONF"; then
+    exit 0
+fi
+
+if ! grep -qE '^[[:space:]]*http[[:space:]]*\{' "$CONF"; then
+    printf 'kgsm-base: %s has no http block to add the conf.d include to — add it by hand\n' "$CONF" >&2
+    exit 0
+fi
+
+sed -i -E '0,/^[[:space:]]*http[[:space:]]*\{/s//&\n    include \/etc\/nginx\/conf.d\/*.conf;/' "$CONF"
+printf 'kgsm-base: added "include /etc/nginx/conf.d/*.conf;" to %s — the sites KGSM installs are read from there\n' "$CONF"

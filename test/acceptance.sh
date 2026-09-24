@@ -625,6 +625,21 @@ me="$(docker exec "$JOINER" curl -s -H "Authorization: Bearer ${token}" http://1
     | grep -oE '"tier" *: *"[^"]*"' | head -1)"
 info "this cluster's administrator on the joiner: ${me:-no answer}"
 
+# ------------------------------------------------------------------------ the web server, after KGSM
+#
+# The runbook's prerequisite for serving the cluster's names, installed the way a person would: after
+# the node. The components' site files are already in conf.d, which Arch's stock nginx.conf does not
+# read; kgsm-base's pacman hook is what makes it, with nobody editing the file.
+echo
+log "installing nginx after the node"
+docker exec "$CONTAINER" pacman -S --noconfirm nginx >>"$INSTALLLOG" 2>&1
+confd="$(docker exec "$CONTAINER" grep -cE '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/\*\.conf;' \
+    /etc/nginx/nginx.conf 2>/dev/null)"
+expect "${confd:-0}" 1 "nginx reads the sites KGSM installed, with nobody editing nginx.conf"
+nginx_t="$(docker exec "$CONTAINER" nginx -t 2>&1 | tail -1)"
+case "$nginx_t" in *successful*) ok "nginx accepts the configuration with KGSM's sites in it" ;;
+                   *)            bad "nginx -t: ${nginx_t:-no answer}" ;; esac
+
 # ------------------------------------------------------------------- measured, and not asserted
 #
 # Where kgsm-keyring came from. Nothing installs it by name — a repository whose kgsm-base declares

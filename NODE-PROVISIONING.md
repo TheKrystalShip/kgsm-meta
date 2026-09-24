@@ -356,8 +356,8 @@ Machine prerequisites:
 - `nginx` installed and enabled (`systemctl enable --now nginx`). The package ships
   `/etc/nginx/conf.d/00-kgsm-api-sites.conf`, the proxy rules, the reload grant and the
   `/var/lib/kgsm/{tls,nginx}` directories; nothing is hand-copied. Arch's stock `nginx.conf` reads
-  no `conf.d`, so its `http {}` block needs `include /etc/nginx/conf.d/*.conf;` — without it the
-  site file is never loaded and `nginx -t` passes anyway.
+  no `conf.d`, so kgsm-base's pacman hook adds `include /etc/nginx/conf.d/*.conf;` to its `http {}`
+  block whenever nginx or a KGSM site is installed, in either order.
 - The router forwards TCP 443 to this machine, as a plain port forward. A proxy that terminates TLS
   in front of it serves only the names it holds certificates for and refuses the cluster's name with
   `unrecognized name`; one in front must pass the connection through by SNI. Port 80 is not needed:

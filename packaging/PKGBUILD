@@ -94,5 +94,11 @@ package() {
     install -Dm644 "${base}/zz-kgsm-node-apply.hook" \
         "${pkgdir}/usr/share/libalpm/hooks/zz-kgsm-node-apply.hook"
 
+    # nginx reads the sites the components install, whichever of nginx and a site arrives first.
+    install -Dm644 "${base}/kgsm-nginx-confd.hook" \
+        "${pkgdir}/usr/share/libalpm/hooks/kgsm-nginx-confd.hook"
+    install -Dm755 "${base}/nginx-reads-confd" \
+        "${pkgdir}/usr/lib/kgsm-base/nginx-reads-confd"
+
     install -Dm644 "${startdir}/../LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

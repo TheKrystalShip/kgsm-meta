@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.10.0]
+
+### Added — nginx reads the sites KGSM installs, with nobody editing nginx.conf
+
+kgsm-base ships a pacman hook, `kgsm-nginx-confd.hook`, that runs `/usr/lib/kgsm-base/nginx-reads-confd`
+whenever nginx's configuration or a KGSM site include (`/etc/nginx/conf.d/00-kgsm-*`) is installed or
+upgraded, in either order. It adds `include /etc/nginx/conf.d/*.conf;` to `nginx.conf`'s `http` block when
+no spelling of it is there, and never reloads nginx. `NODE-PROVISIONING.md` §10·a states it rather than
+asking for the edit; the acceptance test installs nginx after the node and checks the include and
+`nginx -t`.
+
 ## [1.9.0]
 
 ### Changed — a founding machine joins another cluster by taking its secret

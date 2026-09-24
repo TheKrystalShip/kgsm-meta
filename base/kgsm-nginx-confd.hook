@@ -1,0 +1,18 @@
+# Make nginx read the sites KGSM installs.
+#
+# Every KGSM component that serves a name ships its include as /etc/nginx/conf.d/00-kgsm-<project>-sites.conf,
+# and Arch's stock nginx.conf reads nothing from conf.d — so without the include a node's sites are
+# installed, `nginx -t` passes, and nothing is served. Triggered by nginx's own configuration arriving as
+# well as by a KGSM site, so the order the two packages are installed in does not matter.
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = etc/nginx/nginx.conf
+Target = etc/nginx/conf.d/00-kgsm-*
+
+[Action]
+Description = Making nginx read the sites KGSM installs...
+When = PostTransaction
+Exec = /usr/lib/kgsm-base/nginx-reads-confd
