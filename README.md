@@ -51,7 +51,7 @@ Upgrades from here are `pacman -Syu`, key rotation included.
 
 `NODE-PROVISIONING.md` is the same thing as a runbook: the questions to put to the operator before
 starting, non-interactive forms of every command here, and the steps that come after the packages
-are installed — the library a host has to register before an instance can exist, the administrator's
+are installed — the library a host has to register before an instance can exist, the Owner account's
 one-time password, the model backend the assistant needs. It is written to be handed to an agent
 with a shell on the target host.
 
@@ -150,7 +150,7 @@ from the keys that actually block a unit — a host whose people sign in with a 
 nothing in it.
 
 **A secret a service mints for itself is reported, never left to be discovered.** A package that
-creates the first administrator on its first start writes that one-time password to
+creates the first account on its first start writes that one-time password to
 `/var/lib/<package>/initial-admin-password`, and `kgsm-node-status` names the file for as long as it
 is there — read it as root, sign in, change the password, delete it. A key a service can generate for
 itself is commented out in its env example instead of shipped blank, and the readiness scan counts
@@ -166,8 +166,8 @@ running system; `systemctl start` needs one.
   `disable *`, so without `50-kgsm.preset` every unit would land disabled. The first matching entry
   across preset files wins and they are read in lexical order, so `50-` decides the KGSM units and
   touches nothing else on the host.
-- **`post_install` only, never `post_upgrade`.** An administrator who disabled something keeps it
-  disabled across every later version.
+- **`post_install` only, never `post_upgrade`.** Something somebody disabled stays disabled across
+  every later version.
 - **Starting is the `zz-kgsm-node-apply` hook's**, PostTransaction. The `zz-` prefix is
   load-bearing: alpm runs hooks in filename order and systemd's own — `20-systemd-sysusers`,
   `21-systemd-tmpfiles`, `30-systemd-daemon-reload` — must all have run first. Measured on a real

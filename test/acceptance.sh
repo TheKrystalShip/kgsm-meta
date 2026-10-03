@@ -23,9 +23,9 @@
 #   * installing the kgsm-node group leaves the ready units ACTIVE with nothing else run
 #   * exactly one unit is blocked, on exactly one key: kgsm-bot on Discord__Token
 #   * the machine founded a cluster of its own: a generated secret, the founding record, and the auth
-#     anchor switched on, holding the accounts, with its signing key and its first administrator's
+#     anchor switched on, holding the accounts, with its signing key and its first account's
 #     one-time password both 0600
-#   * the node joined that anchor with nobody signed in, and that administrator signs in at the anchor
+#   * the node joined that anchor with nobody signed in, and that account signs in at the anchor
 #     with the password in the file
 #   * given the operator's answer about the address, the node names the anchor as its sign-in provider
 #     and the panel it serves is in the anchor's client registry without anybody entering it
@@ -275,7 +275,7 @@ install_rc=$?
 
 # What "settled" means, in three parts, because the obvious one is wrong. `is-active` on a Type=simple
 # unit is true the instant the process is exec'd — before the API has opened its stores, minted its
-# signing key or created the first administrator. Waiting on that waits on fork(), and the assertions
+# signing key or created the first account. Waiting on that waits on fork(), and the assertions
 # below then race the very bootstrap they check; which of the two won depended on how many other units
 # the transaction happened to start first, so the suite passed or failed on package count.
 #
@@ -352,7 +352,7 @@ check_mode() {
     else bad "${label}: ${path} is ${mode}, expected ${want}"
     fi
 }
-check_mode /var/lib/kgsm-auth-anchor/initial-admin-password 600 "the first administrator's password"
+check_mode /var/lib/kgsm-auth-anchor/initial-admin-password 600 "the first account's password"
 check_mode /var/lib/kgsm-auth-anchor/session-signing.pem    600 "the anchor's self-minted signing key"
 
 # The cluster of one. A machine whose secret was blank at first install generates one and records that
@@ -465,7 +465,7 @@ if [[ -n "$user" && -n "$pass" ]]; then
         -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" 2>/dev/null)"
     code="$(printf '%s' "$login" | tail -n1)"
     expect "$code" 200 "'${user}' signs in at the anchor with the password from the file"
-    # Kept for the assertions below, which are the admin's view of the node and of the anchor.
+    # Kept for the assertions below, which are the Owner's view of the node and of the anchor.
     token="$(printf '%s' "$login" | head -n-1 | grep -oE '"token" *: *"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
 else
     bad "could not read a username and password out of the initial-admin-password file"
@@ -570,13 +570,13 @@ docker exec "$JOINER" systemctl try-restart kgsm-api kgsm-auth-anchor kgsm-bot k
     2>/dev/null
 settle_node "$JOINER"
 
-# And the one step on the cluster being joined: an admin adds the machine. Asked at this machine's own
-# address rather than loopback, because a node records the address an admin reached it at as where the
+# And the one step on the cluster being joined: the Owner adds the machine. Asked at this machine's own
+# address rather than loopback, because a node records the address it was reached at as where the
 # joiner calls back.
 added="$(docker exec "$CONTAINER" curl -s -o /dev/null -w '%{http_code}' \
     -X POST "http://${a_ip}:8080/api/v1/members" -H "Authorization: Bearer ${token}" \
     -H 'Content-Type: application/json' -d "{\"url\":\"http://${b_ip}:8080\"}" 2>/dev/null)"
-case "$added" in 2??) ok "an admin of this cluster adds the joiner (HTTP ${added})" ;;
+case "$added" in 2??) ok "this cluster's Owner adds the joiner (HTTP ${added})" ;;
                  *)   bad "adding the joiner answered HTTP ${added:-nothing}" ;; esac
 
 joiner_api_log="$(docker exec "$JOINER" journalctl -u kgsm-api.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
@@ -587,7 +587,7 @@ if grep -q 'it held the state of a cluster whose secret this member no longer ho
 else
     bad "the joiner's node never discarded its old cluster's state"
 fi
-if grep -q 'waits for an admin to add it' <<< "$joiner_api_log"; then
+if grep -q 'waits for somebody to add it' <<< "$joiner_api_log"; then
     ok "the joiner's node waited to be added rather than introducing itself to its own anchor"
 else
     bad "the joiner's node did not say it waits to be added"
@@ -599,7 +599,7 @@ else
     bad "the joiner's anchor claimed, or never said it would not"
 fi
 # Nobody introduces it to the cluster it is now in, so it stays out of the roster and serves nothing
-# until an administrator adds it as a promotion candidate. Asked rather than read from its log: a member
+# until somebody adds it as a promotion candidate. Asked rather than read from its log: a member
 # standing by refuses a sign-in with 503, naming whoever it knows holds the accounts.
 refused="$(docker exec "$JOINER" curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8098/auth/sign-in \
     -H 'Content-Type: application/json' -d '{"username":"admin","password":"x"}' 2>/dev/null)"
@@ -618,12 +618,12 @@ for _ in $(seq 1 30); do
 done
 expect "$joined_issuer" "$ISSUER" "the joiner names this cluster's provider"
 
-# Who this cluster's administrator is on the joiner. Measured rather than asserted: the joiner's own
-# first administrator carries the same username, and reconciling one person's two accounts is
+# What this cluster's Owner holds on the joiner. Measured rather than asserted: the joiner's own
+# first account carries the same username, and reconciling one person's two accounts is
 # cluster-auth-plan.md §8's, not this join's.
-me="$(docker exec "$JOINER" curl -s -H "Authorization: Bearer ${token}" http://127.0.0.1:8080/api/v1/me 2>/dev/null \
-    | grep -oE '"tier" *: *"[^"]*"' | head -1)"
-info "this cluster's administrator on the joiner: ${me:-no answer}"
+me="$(docker exec "$JOINER" curl -s -H "Authorization: Bearer ${token}" http://127.0.0.1:8080/api/v1/me/access 2>/dev/null \
+    | grep -oE '"owner" *: *(true|false)' | head -1)"
+info "this cluster's Owner on the joiner: ${me:-no answer}"
 
 # ------------------------------------------------------------------------ the web server, after KGSM
 #

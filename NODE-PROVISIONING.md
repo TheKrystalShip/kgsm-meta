@@ -9,7 +9,7 @@ place where the run legitimately stops is named.
 is, what the hook does. This describes the *run*. Where the two disagree about a command, the README
 is right: its install block is extracted and executed by `test/acceptance.sh`, so it cannot drift.
 
-**Where this ends.** A node that boots into its units, an administrator account somebody can sign in
+**Where this ends.** A node that boots into its units, an Owner account somebody can sign in
 to, a library a game server can be installed into, and — for a cluster node — its assigned name
 served over HTTPS. Installing game servers is not provisioning
 and is not here.
@@ -277,16 +277,16 @@ sudo -u kgsm -H kgsm libraries remove default --drain main # with instances in i
 account's home, where no unit on this host will ever look — including the seeded library, which the
 first run creates wherever `HOME` pointed.
 
-An admin can do the same thing from the panel once somebody has signed in (`POST
-/api/v1/hosts/{id}/libraries`, admin-gated) — but during provisioning nobody has, so the shell is the
+The panel does the same thing once somebody has signed in (`POST
+/api/v1/hosts/{id}/libraries`, on `kgsm:libraries.manage`) — but during provisioning nobody has, so the shell is the
 path.
 
 ## 9. Sign in for the first time
 
 People sign in at the cluster's **auth anchor**, never at a node: `kgsm-api` signs nobody in and
 accepts only sessions the anchor minted. On a machine that founded its own cluster the anchor runs
-here, and its first start finds an empty account store, creates the administrator `admin`, and leaves
-the generated one-time password in a file:
+here, and its first start finds an empty account store, creates the account `admin`, assigns it Owner, and
+leaves the generated one-time password in a file:
 
 ```bash
 sudo cat /var/lib/kgsm-auth-anchor/initial-admin-password
@@ -340,7 +340,7 @@ nothing is cleared by hand. Every member's cluster store is bound to the secret 
 on the restart after the secret changes each one discards the old cluster's roster and assignments
 before reading them. The anchor beside the node stays installed and never claims the joined cluster's
 accounts: `/etc/kgsm/cluster-founded` names the secret this machine generated, not the one it now holds,
-so it stands by until an administrator assigns the accounts to it, and the node waits to be added rather
+so it stands by until somebody assigns the accounts to it, and the node waits to be added rather
 than introducing itself to it. Restart every member on the machine once the secret is set:
 
 ```bash
@@ -375,7 +375,7 @@ Join:
    WireGuard peer address) bound in `Api__Urls` as `http://<private-ip>:8097`.
 2. **Optionally pin the name** on the DNS anchor: `MemberNamePins` in `kgsm-dns.settings.json`
    (`<member-id>=<name>`), then redeploy kgsm-dns. Unpinned, a name is drawn from `MemberNames`.
-3. **An admin adds the member** from the panel's Cluster page, pasting `http://<private-ip>:8097`.
+3. **Add the member** from the panel's Cluster page (`api:members.manage`), pasting `http://<private-ip>:8097`.
 4. **Watch it named**, within a minute:
 
 ```bash
@@ -552,7 +552,7 @@ Two things to do afterwards:
 - **Run `sudo kgsm-node-status`.** The hook restarts what it replaced and starts what became ready,
   and the report says what it did.
 
-An administrator who disabled a unit keeps it disabled across every later version — presets are
+A unit somebody disabled stays disabled across every later version — presets are
 applied on first install only, never on upgrade.
 
 ## 16. What not to do
