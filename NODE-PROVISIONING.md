@@ -181,7 +181,7 @@ Below the table, up to three more sections:
 - **Blocked** names the env file and the exact keys. Act on it.
 - **First sign-in** names a one-time password file a service minted. Act on it (§9). It blocks
   nothing — the unit that wrote it is already running.
-- **Set only if...** is the shared sign-in file, `/etc/kgsm/kgsm-auth.env`. It holds nothing up. A
+- **Set only if...** is the sign-in providers' file, `/etc/kgsm/kgsm-auth.env`. It holds nothing up. A
   host whose people sign in with a KGSM password needs nothing in it.
 
 If the RUNNING column reads `unknown` everywhere, there is no systemd to ask (§2) and nothing was

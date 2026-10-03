@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.12.1]
+
+### Changed — the sign-in providers' file is the anchor's
+
+`/etc/kgsm/kgsm-auth.env` describes itself as what the auth anchor reads: the OAuth applications people
+sign in through. No leaf loads it. The acceptance test signs the Owner in through the provider's own
+authorization-code flow, for the panel the node announces, and reads the joiner's anchor standing by
+from its log.
+
 ## [1.12.0]
 
 ### Added — the preset enables kgsm-web-static

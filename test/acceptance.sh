@@ -454,25 +454,60 @@ for _ in $(seq 1 45); do
 done
 expect "$discovered" "$ISSUER" "the node names the anchor as its sign-in provider"
 
-# The handoff, end to end: the password in that file signs the account in that file in, at the anchor —
-# the node signs nobody in.
+# b64url < bytes — base64url without padding, as PKCE spells a verifier's challenge.
+b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+# anchor_session CONTAINER CLIENT_ORIGIN USER PASS — sign USER in at the anchor the way a browser does
+# for the client at CLIENT_ORIGIN: /authorize for the request in flight, the credential post the
+# provider's page makes, /token for the session. Prints the access token, or nothing when a step is
+# refused — an unregistered client is refused at the first.
+anchor_session() {
+    local c="$1" origin="$2" user="$3" pass="$4"
+    local client verifier challenge cookie location code
+    client="$(sed -E 's#^https?://##; s#:#-#' <<< "$origin")"
+    verifier="$(openssl rand 32 | b64url)"
+    challenge="$(printf '%s' "$verifier" | openssl dgst -sha256 -binary | b64url)"
+    cookie="$(docker exec "$c" curl -s -o /dev/null -D - -G "${ISSUER}/authorize" \
+        --data-urlencode "client_id=${client}" --data-urlencode "redirect_uri=${origin}/signed-in" \
+        --data-urlencode response_type=code --data-urlencode scope=openid --data-urlencode state=acceptance \
+        --data-urlencode "nonce=$(openssl rand 12 | b64url)" --data-urlencode "code_challenge=${challenge}" \
+        --data-urlencode code_challenge_method=S256 2>/dev/null \
+        | grep -oiE '^set-cookie: *kgsm_authz=[^;]+' | sed -E 's/^[^:]+: *//')"
+    [[ -n "$cookie" ]] || return 0
+    location="$(docker exec "$c" curl -s -o /dev/null -D - -X POST "${ISSUER}/authorize/credentials" \
+        -H "Cookie: ${cookie}" -H "Origin: ${ISSUER}" \
+        --data-urlencode "username=${user}" --data-urlencode "password=${pass}" 2>/dev/null \
+        | grep -iE '^location:' | sed -E 's/^[^:]+: *//' | tr -d '\r')"
+    code="$(grep -oE '[?&]code=[^&]+' <<< "$location" | head -1 | cut -d= -f2)"
+    [[ -n "$code" ]] || return 0
+    docker exec "$c" curl -s -X POST "${ISSUER}/token" \
+        --data-urlencode grant_type=authorization_code --data-urlencode "code=${code}" \
+        --data-urlencode "code_verifier=${verifier}" --data-urlencode "redirect_uri=${origin}/signed-in" \
+        --data-urlencode "client_id=${client}" 2>/dev/null \
+        | grep -oE '"access_token" *: *"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/'
+}
+
+# The handoff, end to end: the password in that file signs the account in that file in, at the
+# anchor's own pages — the node signs nobody in — for the panel this node serves. Nobody registers
+# that panel with the provider: the node announces it over gossip, joined to the address the roster
+# holds for it, so a sign-in for it succeeding is the announcement having arrived.
 user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
 pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
 token=""
 if [[ -n "$user" && -n "$pass" ]]; then
-    login="$(docker exec "$CONTAINER" curl -s -w '\n%{http_code}' \
-        -X POST http://127.0.0.1:8098/auth/sign-in -H 'Content-Type: application/json' \
-        -d "{\"username\":\"${user}\",\"password\":\"${pass}\"}" 2>/dev/null)"
-    code="$(printf '%s' "$login" | tail -n1)"
-    expect "$code" 200 "'${user}' signs in at the anchor with the password from the file"
+    for _ in $(seq 1 30); do
+        token="$(anchor_session "$CONTAINER" "http://${a_ip}:8080" "$user" "$pass")"
+        [[ -n "$token" ]] && break
+        sleep 2
+    done
     # Kept for the assertions below, which are the Owner's view of the node and of the anchor.
-    token="$(printf '%s' "$login" | head -n-1 | grep -oE '"token" *: *"[^"]+"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    [[ -n "$token" ]] && ok "'${user}' signs in at the anchor's pages, for this node's panel, with the password from the file" \
+        || bad "'${user}' could not sign in at the anchor for this node's panel"
 else
     bad "could not read a username and password out of the initial-admin-password file"
 fi
 
-# The panel this node serves, registered with the provider by the node's own announcement. Nobody
-# entered it: it arrives over gossip, joined to the address the roster holds for the node.
+# The panel's registration, as the provider holds it: a member's announcement, not anybody's entry.
 clients=""
 for _ in $(seq 1 30); do
     clients="$(docker exec "$CONTAINER" curl -s -H "Authorization: Bearer ${token}" \
@@ -534,7 +569,7 @@ check_mode /var/lib/kgsm/cluster         755 "what members of a cluster on one m
 # The two shared env files. Both ship blank — no package carries a credential — and both are read by
 # every member on the host, so a missing one is a host where sign-in or cluster membership is
 # configured per component instead of once.
-check_mode /etc/kgsm/kgsm-auth.env    640 "the host's shared sign-in applications"
+check_mode /etc/kgsm/kgsm-auth.env    640 "the host's sign-in providers' applications"
 check_mode /etc/kgsm/kgsm-cluster.env 640 "the host's shared cluster secret"
 
 # ---------------------------------------------------------------- a founding machine joins another
@@ -598,12 +633,13 @@ if grep -q 'did not found the cluster it is in, so this anchor never claims' <<<
 else
     bad "the joiner's anchor claimed, or never said it would not"
 fi
-# Nobody introduces it to the cluster it is now in, so it stays out of the roster and serves nothing
-# until somebody adds it as a promotion candidate. Asked rather than read from its log: a member
-# standing by refuses a sign-in with 503, naming whoever it knows holds the accounts.
-refused="$(docker exec "$JOINER" curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8098/auth/sign-in \
-    -H 'Content-Type: application/json' -d '{"username":"admin","password":"x"}' 2>/dev/null)"
-expect "$refused" 503 "the joiner's anchor stands by, signing nobody in"
+# Nobody introduces it to the cluster it is now in, so it stays out of the roster and mints nothing
+# until somebody adds it as a promotion candidate; it says so as it stands by, naming the holder.
+if grep -q "standing by — " <<< "$joiner_anchor_log"; then
+    ok "the joiner's anchor stands by, minting nothing"
+else
+    bad "the joiner's anchor never said it stands by"
+fi
 
 a_standing="$(docker exec "$CONTAINER" journalctl -u kgsm-auth-anchor.service --since "@${since}" --no-pager -o cat \
     2>/dev/null | grep -c 'standing by')"

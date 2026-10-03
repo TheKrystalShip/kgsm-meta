@@ -160,8 +160,8 @@ kgsm_scan() {
                 incomplete=1
             else
                 # A package with no unit holds nothing up. /etc/kgsm/kgsm-auth.env is this case:
-                # the shared sign-in application, which a host signing people in with passwords
-                # alone never needs.
+                # the sign-in providers' applications, which a host signing people in with
+                # passwords alone never needs.
                 KGSM_ADVISORY+=("${envfile}|${keys}")
             fi
         done

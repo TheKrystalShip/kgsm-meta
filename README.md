@@ -130,7 +130,7 @@ not one. Its payload:
 |---|---|
 | `/usr/lib/sysusers.d/kgsm.conf` | the `kgsm` service account every unit runs as |
 | `/usr/lib/tmpfiles.d/kgsm.conf` | `/var/lib/kgsm` and its `events/`, `leaves/`, `leaves/commands/` and `auth/` |
-| `/etc/kgsm/kgsm-auth.env` | the shared sign-in application, keys blank, in `backup=()` |
+| `/etc/kgsm/kgsm-auth.env` | the sign-in providers' applications, keys blank, in `backup=()` |
 | `/usr/lib/systemd/system-preset/50-kgsm.preset` | which units a node runs |
 | `/usr/bin/kgsm-node-status` | what this node runs, and what still needs a person |
 | `/usr/lib/kgsm-base/node-state.sh` | the readiness derivation both tools share |
@@ -143,7 +143,7 @@ Source is `base/`, installed verbatim — nothing here is built or rendered.
 into them and none owns them. Declaring them on the engine would make the engine's presence a
 precondition for a leaf's state directory, and a node can run `kgsm-monitor` with no engine at all.
 
-**`/etc/kgsm/kgsm-auth.env` ships as a real file with blank values.** Three leaves load it with
+**`/etc/kgsm/kgsm-auth.env` ships as a real file with blank values.** The auth anchor loads it with
 `EnvironmentFile=-`, so a host that signs nobody in through a provider still needs it to exist to
 be filled in later. No package may carry a credential, and `kgsm-node-status` reports it separately
 from the keys that actually block a unit — a host whose people sign in with a KGSM password needs
