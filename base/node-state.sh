@@ -118,8 +118,7 @@ kgsm_missing_keys() {
 #   KGSM_OPTIN    the preset policy leaves it disabled; installing it was not choosing to run it
 #
 # KGSM_WAITING holds "<envfile>|<keys>" for every file with outstanding keys, and KGSM_ADVISORY the
-# same for a package that owns no unit — the shared sign-in file is the whole of that case, and
-# nothing is held up by it.
+# same for a package that owns no unit, which holds nothing up.
 #
 # KGSM_HANDOFF holds "<file>|<package>" for a credential a package generated and left for a person
 # to collect. It blocks nothing: the unit that wrote it is running.
@@ -159,9 +158,7 @@ kgsm_scan() {
                 KGSM_WAITING+=("${envfile}|${keys}")
                 incomplete=1
             else
-                # A package with no unit holds nothing up. /etc/kgsm/kgsm-auth.env is this case:
-                # the sign-in providers' applications, which a host signing people in with
-                # passwords alone never needs.
+                # A package with no unit holds nothing up.
                 KGSM_ADVISORY+=("${envfile}|${keys}")
             fi
         done

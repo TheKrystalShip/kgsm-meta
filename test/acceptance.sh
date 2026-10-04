@@ -293,7 +293,7 @@ settle_node() {
     for _ in $(seq 1 90); do
         docker exec "$name" systemctl list-jobs --no-pager 2>/dev/null | grep -q 'No jobs' || { sleep 2; continue; }
         docker exec "$name" curl -fsS -o /dev/null http://127.0.0.1:8080/health 2>/dev/null || { sleep 2; continue; }
-        docker exec "$name" test -e /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null && break
+        docker exec "$name" test -e /var/lib/tks-auth/initial-admin-password 2>/dev/null && break
         sleep 2
     done
 }
@@ -322,7 +322,7 @@ READY=(
     kgsm-reactor.service
     kgsm-journal-prune.timer
     kgsm-api.service
-    kgsm-auth-anchor.service
+    tks-auth.service
     kgsm-firewall.socket
 )
 for u in "${READY[@]}"; do
@@ -339,7 +339,7 @@ expect "$(docker exec "$CONTAINER" systemctl is-enabled kgsm-bot.service 2>/dev/
 # The report a person reads. It must name exactly one outstanding key, and it must be the one no
 # host can invent.
 status="$(docker exec "$CONTAINER" kgsm-node-status 2>&1)"
-keys="$(printf '%s\n' "$status" | sed -n '/Blocked/,/Set only if/p' | grep -oE '\b[A-Za-z]+__[A-Za-z_]+\b' | sort -u | paste -sd' ')"
+keys="$(printf '%s\n' "$status" | sed -n '/Blocked/,/Optional/p' | grep -oE '\b[A-Za-z]+__[A-Za-z_]+\b' | sort -u | paste -sd' ')"
 expect "$keys" "Discord__Token" "kgsm-node-status blocks on exactly one key"
 
 # What the packages minted for themselves, and the modes they minted it at. A key or a password that
@@ -352,8 +352,8 @@ check_mode() {
     else bad "${label}: ${path} is ${mode}, expected ${want}"
     fi
 }
-check_mode /var/lib/kgsm-auth-anchor/initial-admin-password 600 "the first account's password"
-check_mode /var/lib/kgsm-auth-anchor/session-signing.pem    600 "the anchor's self-minted signing key"
+check_mode /var/lib/tks-auth/initial-admin-password 600 "the first account's password"
+check_mode /var/lib/tks-auth/session-signing.pem    600 "the anchor's self-minted signing key"
 
 # The cluster of one. A machine whose secret was blank at first install generates one and records that
 # it founded the cluster — which is what switched its anchor on, and what lets that anchor claim the
@@ -363,7 +363,7 @@ secret_set="$(docker exec "$CONTAINER" grep -cE '^[[:space:]]*Cluster__Secret[[:
 expect "${secret_set:-0}" 1 "the install generated a cluster secret"
 check_mode /etc/kgsm/cluster-founded 644 "the record that this machine founded its cluster"
 
-anchor_log="$(docker exec "$CONTAINER" journalctl -u kgsm-auth-anchor.service --no-pager -o cat 2>/dev/null)"
+anchor_log="$(docker exec "$CONTAINER" journalctl -u tks-auth.service --no-pager -o cat 2>/dev/null)"
 if grep -q "this member holds the cluster's accounts" <<< "$anchor_log"; then
     ok "the anchor holds the cluster's accounts"
 else
@@ -442,8 +442,8 @@ ip_of() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
 a_ip="$(ip_of "$CONTAINER")"
 ISSUER="http://127.0.0.1:8098"
 docker exec "$CONTAINER" sh -c "printf 'Api__PublicBaseUrl=http://%s:8080\n' '${a_ip}' >> /etc/kgsm-api/kgsm-api.env"
-docker exec "$CONTAINER" sh -c "printf 'Anchor__Issuer=%s\n' '${ISSUER}' >> /etc/kgsm-auth-anchor/kgsm-auth-anchor.env"
-docker exec "$CONTAINER" systemctl restart kgsm-api.service kgsm-auth-anchor.service
+docker exec "$CONTAINER" sh -c "printf 'Anchor__Issuer=%s\n' '${ISSUER}' >> /etc/tks-auth/tks-auth.env"
+docker exec "$CONTAINER" systemctl restart kgsm-api.service tks-auth.service
 settle_node "$CONTAINER"
 discovered=""
 for _ in $(seq 1 45); do
@@ -491,8 +491,8 @@ anchor_session() {
 # anchor's own pages — the node signs nobody in — for the panel this node serves. Nobody registers
 # that panel with the provider: the node announces it over gossip, joined to the address the roster
 # holds for it, so a sign-in for it succeeding is the announcement having arrived.
-user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
-pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/kgsm-auth-anchor/initial-admin-password 2>/dev/null)"
+user="$(docker exec "$CONTAINER" sed -n 's/^username: *//p' /var/lib/tks-auth/initial-admin-password 2>/dev/null)"
+pass="$(docker exec "$CONTAINER" sed -n 's/^password: *//p' /var/lib/tks-auth/initial-admin-password 2>/dev/null)"
 token=""
 if [[ -n "$user" && -n "$pass" ]]; then
     for _ in $(seq 1 30); do
@@ -569,7 +569,7 @@ check_mode /var/lib/kgsm/cluster         755 "what members of a cluster on one m
 # The two shared env files. Both ship blank — no package carries a credential — and both are read by
 # every member on the host, so a missing one is a host where sign-in or cluster membership is
 # configured per component instead of once.
-check_mode /etc/kgsm/kgsm-auth.env    640 "the host's sign-in providers' applications"
+check_mode /etc/tks-auth/providers.env    640 "the host's sign-in providers' applications"
 check_mode /etc/kgsm/kgsm-cluster.env 640 "the host's shared cluster secret"
 
 # ---------------------------------------------------------------- a founding machine joins another
@@ -586,7 +586,7 @@ install_node "$JOINER" "$JOINLOG"
 expect "$?" 0 "the joiner installs with the README's commands"
 settle_node "$JOINER"
 
-joiner_anchor_log="$(docker exec "$JOINER" journalctl -u kgsm-auth-anchor.service --no-pager -o cat 2>/dev/null)"
+joiner_anchor_log="$(docker exec "$JOINER" journalctl -u tks-auth.service --no-pager -o cat 2>/dev/null)"
 if grep -q "this member holds the cluster's accounts" <<< "$joiner_anchor_log"; then
     ok "the joiner founded a cluster of its own, its anchor holding that cluster's accounts"
 else
@@ -601,7 +601,7 @@ secret="$(docker exec "$CONTAINER" sed -n 's/^[[:space:]]*Cluster__Secret[[:spac
 docker exec "$JOINER" sed -i "s/^[[:space:]]*Cluster__Secret[[:space:]]*=.*$/Cluster__Secret=${secret}/" \
     /etc/kgsm/kgsm-cluster.env
 since="$(docker exec "$JOINER" date +%s)"
-docker exec "$JOINER" systemctl try-restart kgsm-api kgsm-auth-anchor kgsm-bot kgsm-assistant-service kgsm-dns \
+docker exec "$JOINER" systemctl try-restart kgsm-api tks-auth kgsm-bot kgsm-assistant-service kgsm-dns \
     2>/dev/null
 settle_node "$JOINER"
 
@@ -615,7 +615,7 @@ case "$added" in 2??) ok "this cluster's Owner adds the joiner (HTTP ${added})" 
                  *)   bad "adding the joiner answered HTTP ${added:-nothing}" ;; esac
 
 joiner_api_log="$(docker exec "$JOINER" journalctl -u kgsm-api.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
-joiner_anchor_log="$(docker exec "$JOINER" journalctl -u kgsm-auth-anchor.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
+joiner_anchor_log="$(docker exec "$JOINER" journalctl -u tks-auth.service --since "@${since}" --no-pager -o cat 2>/dev/null)"
 
 if grep -q 'it held the state of a cluster whose secret this member no longer holds' <<< "$joiner_api_log"; then
     ok "the joiner's node discarded what it knew of its old cluster on its own"
@@ -641,7 +641,7 @@ else
     bad "the joiner's anchor never said it stands by"
 fi
 
-a_standing="$(docker exec "$CONTAINER" journalctl -u kgsm-auth-anchor.service --since "@${since}" --no-pager -o cat \
+a_standing="$(docker exec "$CONTAINER" journalctl -u tks-auth.service --since "@${since}" --no-pager -o cat \
     2>/dev/null | grep -c 'standing by')"
 expect "${a_standing:-0}" 0 "this cluster's anchor still holds its accounts after the join"
 

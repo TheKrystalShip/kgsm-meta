@@ -72,13 +72,11 @@ if (( ${#KGSM_HANDOFF[@]} )); then
 fi
 
 if (( ${#KGSM_ADVISORY[@]} )); then
-    note "Set only if this host signs people in through an external provider:"
+    note "Optional — no unit waits on these:"
     for entry in "${KGSM_ADVISORY[@]}"; do
         printf '     %s\n' "${entry%%|*}"
         printf '       %s\n' "${entry#*|}"
     done
-    note "Nothing is held up by these — a host whose people sign in with a KGSM password"
-    note "needs none of them."
     echo
 fi
 

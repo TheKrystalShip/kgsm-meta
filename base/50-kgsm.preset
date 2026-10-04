@@ -50,7 +50,7 @@ disable kgsm-speech.service
 # and its own install hook switches it on only where this machine founded its cluster
 # (/etc/kgsm/cluster-founded matching the secret). Everywhere else it stays installed and off — a
 # promotion candidate rather than a second authority, and never a fresh claim racing the holder.
-disable kgsm-auth-anchor.service
+disable tks-auth.service
 
 # The indexer starts building a retrieval corpus, which costs GPU time and disk on a host that may
 # have wanted the assistant alone. The assistant answers without it.

@@ -181,8 +181,7 @@ Below the table, up to three more sections:
 - **Blocked** names the env file and the exact keys. Act on it.
 - **First sign-in** names a one-time password file a service minted. Act on it (§9). It blocks
   nothing — the unit that wrote it is already running.
-- **Set only if...** is the sign-in providers' file, `/etc/kgsm/kgsm-auth.env`. It holds nothing up. A
-  host whose people sign in with a KGSM password needs nothing in it.
+- **Optional** names an env file no unit waits on. It holds nothing up.
 
 If the RUNNING column reads `unknown` everywhere, there is no systemd to ask (§2) and nothing was
 started.
@@ -289,7 +288,7 @@ here, and its first start finds an empty account store, creates the account `adm
 leaves the generated one-time password in a file:
 
 ```bash
-sudo cat /var/lib/kgsm-auth-anchor/initial-admin-password
+sudo cat /var/lib/tks-auth/initial-admin-password
 ```
 
 Give it to the person. **It is removed the first time that account signs in with a password**, so it
@@ -344,10 +343,10 @@ so it stands by until somebody assigns the accounts to it, and the node waits to
 than introducing itself to it. Restart every member on the machine once the secret is set:
 
 ```bash
-sudo systemctl try-restart kgsm-api kgsm-auth-anchor kgsm-bot kgsm-assistant-service kgsm-dns
+sudo systemctl try-restart kgsm-api tks-auth kgsm-bot kgsm-assistant-service kgsm-dns
 ```
 
-An anchor standing by holds nothing; `systemctl disable --now kgsm-auth-anchor.service` stops it
+An anchor standing by holds nothing; `systemctl disable --now tks-auth.service` stops it
 entirely where it is not wanted as a promotion candidate. Accounts made in the old cluster stay behind:
 joining is not a merge, and `cluster-auth-plan.md` §8 is where reconciling them lives.
 
@@ -405,7 +404,7 @@ at. Fill in only what question 4 actually asked for:
 - **`Api__PublicBaseUrl`** — the address a browser reaches this node at, `http://<ip>:8080` or its
   public origin. The node was introduced to its anchor over loopback, so without it the cluster's
   roster hands a browser `127.0.0.1`.
-- **`Anchor__Issuer`** in `/etc/kgsm-auth-anchor/kgsm-auth-anchor.env` — the address people sign in
+- **`Anchor__Issuer`** in `/etc/tks-auth/tks-auth.env` — the address people sign in
   at, `http://<ip>:8098` or the anchor's public origin: the operator's answer about the address. The
   anchor stamps it on every session, and the node names it at `/.well-known/oauth-protected-resource` to
   any surface asking who signs people in. Until it is a URL the anchor's OpenID Connect doors sign
@@ -421,8 +420,8 @@ at. Fill in only what question 4 actually asked for:
   non-root service; the anchor's own env file takes the same four keys for its port.
 - **`Api__CorsOrigins`** — needed only when a *different* origin must reach this API. Same-origin needs
   none, and unset means same-origin only.
-- **The Discord application**, only for question 6, goes in `/etc/kgsm/kgsm-auth.env`, which the anchor
-  reads; its callbacks are the anchor's, `/auth/<provider>/callback` and
+- **The Discord application**, only for question 6, goes in `/etc/tks-auth/providers.env`, uncommented,
+  which the anchor reads; its callbacks are the anchor's, `/auth/<provider>/callback` and
   `/auth/identities/<provider>/callback` on the anchor's address.
 
 ## 11. The decisions left deliberately off

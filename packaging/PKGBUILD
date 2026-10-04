@@ -34,10 +34,9 @@ options=('!debug')
 # before all of this — `pacman-key --add` + `--lsign-key`, which the README carries.
 depends=('bash' 'systemd' 'pacman' 'grep' 'sed' 'coreutils' 'kgsm-keyring')
 
-# The two shared env files are what a person edits here. backup=() is pacman's version of
+# The shared env file is what a person edits here. backup=() is pacman's version of
 # create-if-absent-never-clobber: an upgrade writes .pacnew beside an edited file, never over it.
-backup=('etc/kgsm/kgsm-auth.env'
-        'etc/kgsm/kgsm-cluster.env')
+backup=('etc/kgsm/kgsm-cluster.env')
 # Founds a cluster of one on a machine whose secret is blank at first install.
 install="${pkgname}.install"
 
@@ -57,14 +56,6 @@ package() {
     # and the account store. Written by several packages and owned by none of them.
     install -Dm644 "${base}/tmpfiles.d/kgsm.conf" \
         "${pkgdir}/usr/lib/tmpfiles.d/kgsm.conf"
-
-    # The OAuth applications every surface on the host signs people in through, with the values
-    # blank — no package ships a credential. Root-owned 0640 is correct rather than strict: systemd
-    # reads EnvironmentFile= as root before dropping to User=, so nothing reads it as the service
-    # account. It is a real file rather than a documented one because three leaves load it with
-    # EnvironmentFile=- and a host that signs nobody in must still find it there to fill in.
-    install -Dm640 "${base}/kgsm-auth.env" \
-        "${pkgdir}/etc/kgsm/kgsm-auth.env"
 
     # The cluster secret every member on the host holds, shipped blank because no package carries a
     # credential; the install hook generates one on a machine that founds its own cluster. One file

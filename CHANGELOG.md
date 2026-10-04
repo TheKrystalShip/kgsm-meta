@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.13.0]
+
+### Changed — the auth anchor is tks-auth
+
+- The preset, the acceptance test, the provisioning guide and the release aggregation name the
+  daemon's package and unit `tks-auth`, and its paths `/var/lib/tks-auth/` and `/etc/tks-auth/`.
+- `kgsm-base` ships no sign-in providers' file. `tks-auth` ships `/etc/tks-auth/providers.env` itself,
+  with every key commented out, so the file blocks no unit.
+- `kgsm-node-status` heads an env file of a package with no unit "Optional".
+
 ## [1.12.1]
 
 ### Changed — the sign-in providers' file is the anchor's
