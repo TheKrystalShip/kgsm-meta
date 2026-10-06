@@ -82,6 +82,7 @@ REPOS=(
     'kgsm-speech:v,models-v'
     'kgsm-watchdog:v'
     'kgsm-web:v'
+    'tks-assistant:model-server-v'
 )
 
 for tool in repo-add repo-remove vercmp gpg gh curl bsdtar diff cmp; do
