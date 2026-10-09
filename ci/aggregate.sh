@@ -121,10 +121,11 @@ assets_of() {
 }
 
 # The newest release carrying a given tag prefix. `gh release list` is newest-first, so the first
-# match is the answer; a repo with no release under that prefix yields nothing and is skipped.
+# match is the answer; a repo with no release under that prefix, or no such repo, yields nothing and
+# is skipped. The caller assigns the result under `set -e`, so a failed listing must not fail here.
 newest_tag() {
     gh release list --repo "TheKrystalShip/$1" --limit 100 --json tagName --jq \
-        "[.[] | select(.tagName | startswith(\"$2\"))] | .[0].tagName" 2>/dev/null
+        "[.[] | select(.tagName | startswith(\"$2\"))] | .[0].tagName" 2>/dev/null || true
 }
 
 declare -A newest=()     # package name -> "<version>|<file>"
