@@ -37,11 +37,11 @@ enable kgsm-web-static.service
 
 # ── Socket-activated: the socket is the unit that is enabled ──────────────────
 # Enabling the .service as well would defeat the activation — kgsm-firewall's daemon holds root and
-# kgsm-speech's holds ~1.6GB of models, and both are meant to exit when nobody is asking. An
+# tks-speech's holds ~1.6GB of models, and both are meant to exit when nobody is asking. An
 # inactive .service is each one working correctly.
 enable kgsm-firewall.socket
-enable kgsm-speech.socket
-disable kgsm-speech.service
+enable tks-speech.socket
+disable tks-speech.service
 # kgsm-firewall.service carries no [Install] section — it is static, and a preset line for a static
 # unit changes nothing.
 

@@ -32,7 +32,7 @@
 #   * the API found every leaf this node installed WITHOUT being told where any of them is, and
 #     reports the one it did not install as absent rather than as unreachable
 #
-# A few members are deliberately not installed — see SKIP_MEMBERS, which says why for each.
+# Members deliberately not installed — see SKIP_MEMBERS, which says why for each.
 #
 # Requirements: docker usable WITHOUT sudo, and this checkout sitting in the tks workspace so
 # scripts/publish-repo.sh can build the package set. The packaging key's secret half is needed —
@@ -224,17 +224,15 @@ note "failed before installing anything: ${baseline:-none}"
 # Members this suite does not install. None of them is skipped for being broken, and the exclusion is
 # named out loud below rather than quietly narrowing what "the kgsm-node group" means:
 #
-#   kgsm-speech  pulls 813MB of models as a hard dependency, to serve recognition and synthesis a node
-#                without a GPU cannot usefully run. Paying that download on every run buys nothing.
 #   kgsm-llm     the assistant, exercised on the host that has the hardware for it; here it would only
 #                re-prove what the leaf below proves better — that a leaf which is NOT installed is
 #                reported absent.
 #
-# Their absence is itself under test: the API must report each as absent rather than as a leaf that is
+# Its absence is itself under test: the API must report it as absent rather than as a leaf that is
 # present and unreachable, which is the other half of the discovery this suite exists to check. The
 # Control Panel is installed: the panel a node serves is a client of the cluster's sign-in provider, and
 # its arriving in the provider's registry unasked is one of the things measured.
-SKIP_MEMBERS=(kgsm-speech kgsm-llm)
+SKIP_MEMBERS=(kgsm-llm)
 
 # install_node <container> <log> — the README's install block, then the kgsm-node group less the members
 # above. Returns the first failing step's status.

@@ -132,7 +132,7 @@ not is a typo in the transaction, not a missing package.
 |---|---|---|
 | **Game host** | `kgsm`, `kgsm-watchdog`, `kgsm-monitor`, `kgsm-monitor-net-meter`, `kgsm-scheduler`, `kgsm-reactor`, `kgsm-firewall` | Runs game servers and measures them. No panel, no chat surface. Reachable only by another node's panel |
 | **Panel host** | the above plus `kgsm-api`, `kgsm-web` | Adds the Control Panel: the API and the SPA it serves at `/` |
-| **Assistant host** | plus `kgsm-llm`, optionally `kgsm-rag-indexer`, `kgsm-llm-llamacpp`, `kgsm-speech` | Adds the local assistant. Needs a model server (§11) and real hardware to run it on |
+| **Assistant host** | plus `kgsm-llm`, optionally `kgsm-rag-indexer`, `kgsm-llm-llamacpp`, `tks-speech` | Adds the local assistant. Needs a model server (§11) and real hardware to run it on |
 | **Discord surface** | plus `kgsm-bot` | Adds the Discord bot. Needs the token from question 5 |
 | **Everything** | `kgsm-node` | What `--noconfirm` gives you |
 
@@ -508,7 +508,7 @@ Read `systemctl --failed` against this list before reporting anything:
   same as being ordered after the slice that unit creates at runtime. The second pass attaches it. A
   meter that is still failing after the watchdog is up is a real fault.
 - **A socket-activated `.service` reading `inactive`.** `kgsm-firewall.service` and
-  `kgsm-speech.service` are meant to exit when nobody is asking — `kgsm-speech` holds about 1.6GB of
+  `tks-speech.service` are meant to exit when nobody is asking — `tks-speech` holds about 1.6GB of
   models and only a process ending returns it. The `.socket` being active is the unit that matters.
 - **`systemd-networkd-wait-online.service` timing out** on a host where networkd manages nothing. It
   is pulled in by `network-online.target`, which the assistant and bot units want.

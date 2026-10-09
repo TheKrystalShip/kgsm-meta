@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.14.0]
+
+### Changed — speech is tks-speech
+
+- The preset enables `tks-speech.socket` and leaves `tks-speech.service` to socket activation. The
+  release aggregation collects the speech daemon and its models from `tks-speech` alone, the
+  acceptance test installs no speech member, and the provisioning guide names the `tks-speech`
+  package and unit.
+
 ## [1.13.0]
 
 ### Changed — the auth anchor is tks-auth

@@ -79,7 +79,6 @@ REPOS=(
     'kgsm-monitor:v'
     'kgsm-reactor:v'
     'kgsm-scheduler:v'
-    'kgsm-speech:v,models-v'
     'kgsm-watchdog:v'
     'kgsm-web:v'
     'tks-assistant:model-server-v,harness-v'
